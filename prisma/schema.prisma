@@ -6,3 +6,442 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model EFMigrationsHistory {
+  migrationId    String @id(map: "PK___EFMigrationsHistory") @map("MigrationId") @db.VarChar(150)
+  productVersion String @map("ProductVersion") @db.VarChar(32)
+
+  @@map("__EFMigrationsHistory")
+}
+
+model ActivityEvent {
+  id                  String    @id(map: "PK_activity_events") @db.Uuid
+  orgId               String    @map("org_id") @db.Uuid
+  teamId              String?   @map("team_id") @db.Uuid
+  employeeId          String    @map("employee_id") @db.Uuid
+  eventType           String    @map("event_type")
+  workMode            Boolean?  @map("work_mode")
+  appName             String?   @map("app_name") @db.VarChar(255)
+  appType             String?   @map("app_type")
+  appCategory         String?   @map("app_category") @db.VarChar(100)
+  appDomain           String?   @map("app_domain") @db.VarChar(500)
+  appFullUrl          String?   @map("app_full_url")
+  productivityStatus  String?   @map("productivity_status")
+  durationSeconds     Int?      @map("duration_seconds")
+  startTime           DateTime? @map("start_time") @db.Timestamptz(6)
+  endTime             DateTime? @map("end_time") @db.Timestamptz(6)
+  trackingMode        String?   @map("tracking_mode") @db.VarChar(50)
+  operatingSystem     String?   @map("operating_system") @db.VarChar(20)
+  externalTrackingId  String?   @map("external_tracking_id") @db.VarChar(255)
+  rawPayload          Json?     @map("raw_payload")
+  receivedAt          DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  @@index([orgId, employeeId, receivedAt], map: "IX_activity_events_org_id_employee_id_received_at")
+  @@index([orgId, receivedAt], map: "IX_activity_events_org_id_received_at")
+  @@map("activity_events")
+}
+
+model AgentEmployeeMapping {
+  id             String   @id(map: "PK_agent_employee_mappings") @db.Uuid
+  employeeId     String   @map("employee_id") @db.Uuid
+  orgId          String   @map("org_id") @db.Uuid
+  agentProvider  String   @default("trackpilots") @map("agent_provider") @db.VarChar(50)
+  externalUserId String   @map("external_user_id") @db.VarChar(255)
+  externalTeamId String?  @map("external_team_id") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_agent_employee_mappings_employees_employee_id")
+
+  @@unique([agentProvider, externalUserId, orgId], map: "IX_agent_employee_mappings_agent_provider_external_user_id_org~")
+  @@index([employeeId], map: "IX_agent_employee_mappings_employee_id")
+  @@map("agent_employee_mappings")
+}
+
+model AgentOrgMapping {
+  id                     String       @id(map: "PK_agent_org_mappings") @db.Uuid
+  orgId                  String       @unique(map: "IX_agent_org_mappings_org_id") @map("org_id") @db.Uuid
+  agentProvider          String       @default("trackpilots") @map("agent_provider") @db.VarChar(50)
+  externalOrgId          String       @map("external_org_id") @db.VarChar(255)
+  apiKeyEncrypted        String       @map("api_key_encrypted")
+  webhookSecretEncrypted String       @map("webhook_secret_encrypted")
+  isActive               Boolean      @default(true) @map("is_active")
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime     @map("updated_at") @db.Timestamptz(6)
+  organization           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_agent_org_mappings_organizations_org_id")
+
+  @@map("agent_org_mappings")
+}
+
+model AgentTeamMapping {
+  id             String   @id(map: "PK_agent_team_mappings") @db.Uuid
+  teamId         String   @map("team_id") @db.Uuid
+  orgId          String   @map("org_id") @db.Uuid
+  agentProvider  String   @default("trackpilots") @map("agent_provider") @db.VarChar(50)
+  externalTeamId String   @map("external_team_id") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  team           Team     @relation(fields: [teamId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_agent_team_mappings_teams_team_id")
+
+  @@unique([agentProvider, externalTeamId, orgId], map: "IX_agent_team_mappings_agent_provider_external_team_id_org_id")
+  @@index([teamId], map: "IX_agent_team_mappings_team_id")
+  @@map("agent_team_mappings")
+}
+
+model AuditLog {
+  id          String   @id(map: "PK_audit_logs") @db.Uuid
+  actorId     String   @map("actor_id") @db.Uuid
+  actorType   String   @map("actor_type")
+  orgId       String?  @map("org_id") @db.Uuid
+  action      String   @db.VarChar(255)
+  targetType  String?  @map("target_type") @db.VarChar(100)
+  targetId    String?  @map("target_id") @db.Uuid
+  beforeValue Json?    @map("before_value")
+  afterValue  Json?    @map("after_value")
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([actorId, createdAt], map: "IX_audit_logs_actor_id_created_at")
+  @@index([orgId, createdAt], map: "IX_audit_logs_org_id_created_at")
+  @@map("audit_logs")
+}
+
+model ClientAuth {
+  id                   String    @id(map: "PK_client_auth") @db.Uuid
+  employeeId           String    @unique(map: "IX_client_auth_employee_id") @map("employee_id") @db.Uuid
+  orgId                String    @map("org_id") @db.Uuid
+  email                String    @db.VarChar(255)
+  passwordHash         String    @map("password_hash") @db.VarChar(500)
+  refreshTokenHash     String?   @map("refresh_token_hash") @db.VarChar(500)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(6)
+  passwordSet          Boolean   @default(false) @map("password_set")
+  lastLoginAt          DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @map("updated_at") @db.Timestamptz(6)
+  employee             Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_client_auth_employees_employee_id")
+
+  @@index([orgId, email], map: "IX_client_auth_org_id_email")
+  @@map("client_auth")
+}
+
+model DailySummary {
+  id                  String    @id(map: "PK_daily_summaries") @db.Uuid
+  orgId               String    @map("org_id") @db.Uuid
+  teamId              String?   @map("team_id") @db.Uuid
+  employeeId          String    @map("employee_id") @db.Uuid
+  summaryDate         DateTime  @map("summary_date") @db.Date
+  firstCheckin        DateTime? @map("first_checkin") @db.Timestamptz(6)
+  lastCheckout        DateTime? @map("last_checkout") @db.Timestamptz(6)
+  totalWorkSeconds    Int       @default(0) @map("total_work_seconds")
+  productiveSeconds   Int       @default(0) @map("productive_seconds")
+  unproductiveSeconds Int       @default(0) @map("unproductive_seconds")
+  neutralSeconds      Int       @default(0) @map("neutral_seconds")
+  idleSeconds         Int       @default(0) @map("idle_seconds")
+  productivityScore   Decimal?  @map("productivity_score") @db.Decimal(5, 2)
+  isPresent           Boolean   @default(false) @map("is_present")
+  isLate              Boolean   @default(false) @map("is_late")
+  overtimeSeconds     Int       @default(0) @map("overtime_seconds")
+  screenshotsCount    Int       @default(0) @map("screenshots_count")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([orgId, employeeId, summaryDate], map: "IX_daily_summaries_org_id_employee_id_summary_date")
+  @@index([orgId, summaryDate], map: "IX_daily_summaries_org_id_summary_date")
+  @@index([orgId, teamId, summaryDate], map: "IX_daily_summaries_org_id_team_id_summary_date")
+  @@map("daily_summaries")
+}
+
+model Employee {
+  id                        String                   @id(map: "PK_employees") @db.Uuid
+  orgId                     String                   @map("org_id") @db.Uuid
+  teamId                    String?                  @map("team_id") @db.Uuid
+  name                      String                   @db.VarChar(255)
+  email                     String                   @db.VarChar(255)
+  roleId                    String                   @map("role_id") @db.Uuid
+  designation               String?                  @db.VarChar(100)
+  department                String?                  @db.VarChar(100)
+  profilePicUrl             String?                  @map("profile_pic_url") @db.VarChar(1000)
+  workModeType              String                   @default("Office") @map("work_mode_type")
+  status                    String                   @default("active") @db.VarChar(20)
+  operatingSystem           String?                  @map("operating_system") @db.VarChar(20)
+  agentVersion              String?                  @map("agent_version") @db.VarChar(50)
+  lastSeenAt                DateTime?                @map("last_seen_at") @db.Timestamptz(6)
+  isCurrentlyWorking        Boolean                  @default(false) @map("is_currently_working")
+  isDeleted                 Boolean                  @default(false) @map("is_deleted")
+  deletedAt                 DateTime?                @map("deleted_at") @db.Timestamptz(6)
+  createdAt                 DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                 @map("updated_at") @db.Timestamptz(6)
+  agentEmployeeMappings     AgentEmployeeMapping[]
+  clientAuth                ClientAuth?
+  organization              Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_employees_organizations_org_id")
+  role                      Role                     @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_employees_roles_role_id")
+  team                      Team?                    @relation(fields: [teamId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_employees_teams_team_id")
+  expectedWorkHoursSettings ExpectedWorkHoursSetting[]
+  idleAlertSettings         IdleAlertSetting[]
+  screenshotSettings        ScreenshotSetting[]
+  stealthMonitoringSettings StealthMonitoringSetting[]
+  workDaySettings           WorkDaySetting[]
+
+  @@index([orgId, status], map: "IX_employees_org_id_status")
+  @@index([orgId, teamId], map: "IX_employees_org_id_team_id")
+  @@index([roleId], map: "IX_employees_role_id")
+  @@index([teamId], map: "IX_employees_team_id")
+  @@map("employees")
+}
+
+model ExpectedWorkHoursSetting {
+  id                           String   @id(map: "PK_expected_work_hours_settings") @db.Uuid
+  orgId                        String   @map("org_id") @db.Uuid
+  employeeId                   String   @map("employee_id") @db.Uuid
+  expectedWorkHoursPerDay      Decimal  @default(8.0) @map("expected_work_hours_per_day") @db.Decimal(4, 2)
+  expectedProductiveHoursPerDay Decimal @default(6.0) @map("expected_productive_hours_per_day") @db.Decimal(4, 2)
+  expectedInTime               DateTime @default(dbgenerated("'08:00:00'::time without time zone")) @map("expected_in_time") @db.Time(6)
+  updatedAt                    DateTime @map("updated_at") @db.Timestamptz(6)
+  employee                     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_expected_work_hours_settings_employees_employee_id")
+
+  @@unique([orgId, employeeId], map: "IX_expected_work_hours_settings_org_id_employee_id")
+  @@index([employeeId], map: "IX_expected_work_hours_settings_employee_id")
+  @@map("expected_work_hours_settings")
+}
+
+model GlobalProductivityClassification {
+  id               String   @id(map: "PK_global_productivity_classifications") @db.Uuid
+  appNamePattern   String   @map("app_name_pattern") @db.VarChar(255)
+  appDomainPattern String?  @map("app_domain_pattern") @db.VarChar(500)
+  appCategory      String?  @map("app_category") @db.VarChar(100)
+  defaultStatus    String   @map("default_status")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @map("updated_at") @db.Timestamptz(6)
+
+  @@map("global_productivity_classifications")
+}
+
+model IdleAlertSetting {
+  id                 String   @id(map: "PK_idle_alert_settings") @db.Uuid
+  orgId              String   @map("org_id") @db.Uuid
+  employeeId         String   @map("employee_id") @db.Uuid
+  idleAlertEnabled   Boolean  @default(true) @map("idle_alert_enabled")
+  minIdleTimeMinutes Int      @default(5) @map("min_idle_time_minutes")
+  updatedAt          DateTime @map("updated_at") @db.Timestamptz(6)
+  employee           Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_idle_alert_settings_employees_employee_id")
+
+  @@unique([orgId, employeeId], map: "IX_idle_alert_settings_org_id_employee_id")
+  @@index([employeeId], map: "IX_idle_alert_settings_employee_id")
+  @@map("idle_alert_settings")
+}
+
+model OrgDefaultSetting {
+  id                           String       @id(map: "PK_org_default_settings") @db.Uuid
+  orgId                        String       @unique(map: "IX_org_default_settings_org_id") @map("org_id") @db.Uuid
+  defaultWorkDays              Json         @map("default_work_days")
+  defaultWorkHoursPerDay       Decimal      @default(8.0) @map("default_work_hours_per_day") @db.Decimal(4, 2)
+  defaultProductiveHoursPerDay Decimal      @default(6.0) @map("default_productive_hours_per_day") @db.Decimal(4, 2)
+  defaultExpectedInTime        DateTime     @default(dbgenerated("'08:00:00'::time without time zone")) @map("default_expected_in_time") @db.Time(6)
+  defaultScreenshotEnabled     Boolean      @default(true) @map("default_screenshot_enabled")
+  defaultBlurEnabled           Boolean      @default(false) @map("default_blur_enabled")
+  defaultCaptureIntervalMinutes Int         @default(1) @map("default_capture_interval_minutes")
+  defaultIdleAlertEnabled      Boolean      @default(true) @map("default_idle_alert_enabled")
+  defaultMinIdleTimeMinutes    Int          @default(5) @map("default_min_idle_time_minutes")
+  defaultStealthEnabled        Boolean      @default(false) @map("default_stealth_enabled")
+  timezone                     String       @default("UTC") @db.VarChar(50)
+  updatedAt                    DateTime     @map("updated_at") @db.Timestamptz(6)
+  organization                 Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_org_default_settings_organizations_org_id")
+
+  @@map("org_default_settings")
+}
+
+model OrgProductivityOverride {
+  id               String       @id(map: "PK_org_productivity_overrides") @db.Uuid
+  orgId            String       @map("org_id") @db.Uuid
+  appNamePattern   String       @map("app_name_pattern") @db.VarChar(255)
+  appDomainPattern String?      @map("app_domain_pattern") @db.VarChar(500)
+  overriddenStatus String       @map("overridden_status")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @map("updated_at") @db.Timestamptz(6)
+  organization     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_org_productivity_overrides_organizations_org_id")
+
+  @@unique([orgId, appNamePattern, appDomainPattern], map: "IX_org_productivity_overrides_org_id_app_name_pattern_app_doma~")
+  @@map("org_productivity_overrides")
+}
+
+model Organization {
+  id                      String                    @id(map: "PK_organizations") @db.Uuid
+  name                    String                    @db.VarChar(255)
+  industry                String?                   @db.VarChar(100)
+  website                 String?                   @db.VarChar(500)
+  country                 String?                   @db.VarChar(100)
+  phone                   String?                   @db.VarChar(50)
+  timezone                String                    @default("UTC") @db.VarChar(50)
+  status                  String                    @default("Trial")
+  contactEmail            String                    @map("contact_email") @db.VarChar(255)
+  logoUrl                 String?                   @map("logo_url") @db.VarChar(1000)
+  isDeleted               Boolean                   @default(false) @map("is_deleted")
+  deletedAt               DateTime?                 @map("deleted_at") @db.Timestamptz(6)
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                  @map("updated_at") @db.Timestamptz(6)
+  agentOrgMapping         AgentOrgMapping?
+  employees               Employee[]
+  orgDefaultSetting       OrgDefaultSetting?
+  orgProductivityOverrides OrgProductivityOverride[]
+  roles                   Role[]
+  subscription            Subscription?
+  teams                   Team[]
+
+  @@map("organizations")
+}
+
+model Role {
+  id              String       @id(map: "PK_roles") @db.Uuid
+  orgId           String       @map("org_id") @db.Uuid
+  name            String       @db.VarChar(100)
+  permissions     Json
+  isSystemDefault Boolean      @default(false) @map("is_system_default")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @map("updated_at") @db.Timestamptz(6)
+  employees       Employee[]
+  organization    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_roles_organizations_org_id")
+
+  @@unique([orgId, name], map: "IX_roles_org_id_name")
+  @@map("roles")
+}
+
+model ScreenshotSetting {
+  id                     String   @id(map: "PK_screenshot_settings") @db.Uuid
+  orgId                  String   @map("org_id") @db.Uuid
+  employeeId             String   @map("employee_id") @db.Uuid
+  screenCaptureEnabled   Boolean  @default(true) @map("screen_capture_enabled")
+  blurEnabled            Boolean  @default(false) @map("blur_enabled")
+  captureIntervalMinutes Int      @default(1) @map("capture_interval_minutes")
+  updatedAt              DateTime @map("updated_at") @db.Timestamptz(6)
+  employee               Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_screenshot_settings_employees_employee_id")
+
+  @@unique([orgId, employeeId], map: "IX_screenshot_settings_org_id_employee_id")
+  @@index([employeeId], map: "IX_screenshot_settings_employee_id")
+  @@map("screenshot_settings")
+}
+
+model Screenshot {
+  id                   String   @id(map: "PK_screenshots") @db.Uuid
+  orgId                String   @map("org_id") @db.Uuid
+  teamId               String?  @map("team_id") @db.Uuid
+  employeeId           String   @map("employee_id") @db.Uuid
+  externalScreenshotId String?  @map("external_screenshot_id") @db.VarChar(255)
+  imageUrl             String   @map("image_url") @db.VarChar(1000)
+  thumbnailUrl         String?  @map("thumbnail_url") @db.VarChar(1000)
+  isBlurred            Boolean  @default(false) @map("is_blurred")
+  appName              String?  @map("app_name") @db.VarChar(255)
+  appType              String?  @map("app_type")
+  appCategory          String?  @map("app_category") @db.VarChar(100)
+  appDomain            String?  @map("app_domain") @db.VarChar(500)
+  appFullUrl           String?  @map("app_full_url")
+  productivityStatus   String?  @map("productivity_status")
+  isIdle               Boolean  @default(false) @map("is_idle")
+  capturedAt           DateTime @map("captured_at") @db.Timestamptz(6)
+  operatingSystem      String?  @map("operating_system") @db.VarChar(20)
+  workType             String?  @map("work_type") @db.VarChar(20)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([orgId, capturedAt], map: "IX_screenshots_org_id_captured_at")
+  @@index([orgId, employeeId, capturedAt], map: "IX_screenshots_org_id_employee_id_captured_at")
+  @@map("screenshots")
+}
+
+model StealthMonitoringSetting {
+  id                       String    @id(map: "PK_stealth_monitoring_settings") @db.Uuid
+  orgId                    String    @map("org_id") @db.Uuid
+  employeeId               String    @map("employee_id") @db.Uuid
+  stealthEnabled           Boolean   @default(false) @map("stealth_enabled")
+  consentAcknowledged      Boolean   @default(false) @map("consent_acknowledged")
+  consentAcknowledgedAt    DateTime? @map("consent_acknowledged_at") @db.Timestamptz(6)
+  consentAcknowledgedBy    String?   @map("consent_acknowledged_by") @db.Uuid
+  updatedAt                DateTime  @map("updated_at") @db.Timestamptz(6)
+  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_stealth_monitoring_settings_employees_employee_id")
+
+  @@unique([orgId, employeeId], map: "IX_stealth_monitoring_settings_org_id_employee_id")
+  @@index([employeeId], map: "IX_stealth_monitoring_settings_employee_id")
+  @@map("stealth_monitoring_settings")
+}
+
+model Subscription {
+  id                String       @id(map: "PK_subscriptions") @db.Uuid
+  orgId             String       @unique(map: "IX_subscriptions_org_id") @map("org_id") @db.Uuid
+  planName          String       @map("plan_name") @db.VarChar(50)
+  monthlyAmount     Decimal      @map("monthly_amount") @db.Decimal(10, 2)
+  billingCycle      String       @map("billing_cycle") @db.VarChar(20)
+  maxEmployees      Int          @map("max_employees")
+  maxStorageGb      Int          @map("max_storage_gb")
+  dataRetentionDays Int          @map("data_retention_days")
+  featuresEnabled   Json         @default("{}") @map("features_enabled")
+  startedAt         DateTime     @map("started_at") @db.Timestamptz(6)
+  expiresAt         DateTime     @map("expires_at") @db.Timestamptz(6)
+  status            String       @default("active") @db.VarChar(20)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @map("updated_at") @db.Timestamptz(6)
+  organization      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_subscriptions_organizations_org_id")
+
+  @@map("subscriptions")
+}
+
+model SuperAdmin {
+  id                   String    @id(map: "PK_super_admins") @db.Uuid
+  name                 String    @db.VarChar(255)
+  email                String    @unique(map: "IX_super_admins_email") @db.VarChar(255)
+  passwordHash         String    @map("password_hash") @db.VarChar(500)
+  isActive             Boolean   @default(true) @map("is_active")
+  lastLoginAt          DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @map("updated_at") @db.Timestamptz(6)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(6)
+  refreshTokenHash     String?   @map("refresh_token_hash") @db.VarChar(500)
+
+  @@map("super_admins")
+}
+
+model Team {
+  id                String             @id(map: "PK_teams") @db.Uuid
+  orgId             String             @map("org_id") @db.Uuid
+  name              String             @db.VarChar(255)
+  isDeleted         Boolean            @default(false) @map("is_deleted")
+  deletedAt         DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @map("updated_at") @db.Timestamptz(6)
+  agentTeamMappings AgentTeamMapping[]
+  employees         Employee[]
+  organization      Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_teams_organizations_org_id")
+
+  @@map("teams")
+}
+
+model WebhookLog {
+  id               String    @id(map: "PK_webhook_logs") @db.Uuid
+  orgId            String?   @map("org_id") @db.Uuid
+  agentProvider    String    @map("agent_provider") @db.VarChar(50)
+  eventType        String    @map("event_type") @db.VarChar(100)
+  signatureValid   Boolean   @map("signature_valid")
+  processingStatus String    @default("Queued") @map("processing_status")
+  errorMessage     String?   @map("error_message")
+  payloadSizeBytes Int?      @map("payload_size_bytes")
+  receivedAt       DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt      DateTime? @map("processed_at") @db.Timestamptz(6)
+  latencyMs        Int?      @map("latency_ms")
+
+  @@index([orgId, receivedAt], map: "IX_webhook_logs_org_id_received_at")
+  @@index([processingStatus], map: "IX_webhook_logs_processing_status")
+  @@map("webhook_logs")
+}
+
+model WorkDaySetting {
+  id          String   @id(map: "PK_work_day_settings") @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  employeeId  String   @map("employee_id") @db.Uuid
+  monday      Boolean  @default(true)
+  tuesday     Boolean  @default(true)
+  wednesday   Boolean  @default(true)
+  thursday    Boolean  @default(true)
+  friday      Boolean  @default(true)
+  saturday    Boolean  @default(false)
+  sunday      Boolean  @default(false)
+  updatedAt   DateTime @map("updated_at") @db.Timestamptz(6)
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_work_day_settings_employees_employee_id")
+
+  @@unique([orgId, employeeId], map: "IX_work_day_settings_org_id_employee_id")
+  @@index([employeeId], map: "IX_work_day_settings_employee_id")
+  @@map("work_day_settings")
+}

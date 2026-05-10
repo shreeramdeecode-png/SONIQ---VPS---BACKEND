@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 
 type ActorType = 'SuperAdmin' | 'ClientAdmin';
@@ -18,14 +19,15 @@ export class AuditService {
     }): Promise<void> {
         await this.db.auditLog.create({
             data: {
+                id: randomUUID(),
                 actorId: args.actorId,
                 actorType: args.actorType,
                 action: args.action,
                 orgId: args.orgId,
                 targetType: args.targetType,
                 targetId: args.targetId,
-                beforeValue: args.before,
-                afterValue: args.after,
+                beforeValue: args.before as object | undefined,
+                afterValue: args.after as object | undefined,
                 ipAddress: args.ipAddress,
             },
         });

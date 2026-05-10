@@ -65,7 +65,7 @@ export class EmployeeService {
         const tempPassword = await this.passwords.hash(randomUUID());
         const employee = await this.db.employee.create({
             data: {
-                orgId, name: req.name,
+                id: randomUUID(), orgId, name: req.name,
                 email: req.email.toLowerCase(),
                 roleId: req.roleId,
                 teamId: req.teamId,
@@ -73,12 +73,14 @@ export class EmployeeService {
                 department: req.department,
                 workModeType: req.workMode ?? 'Office',
                 status: 'active',
+                updatedAt: new Date(),
                 clientAuth: {
                     create: {
-                        orgId,
+                        id: randomUUID(), orgId,
                         email: req.email.toLowerCase(),
                         passwordHash: tempPassword,
                         passwordSet: false,
+                        updatedAt: new Date(),
                     },
                 },
             },
@@ -149,11 +151,11 @@ export class EmployeeService {
         const { workHours, workDays, screenshot, idleAlert, stealth } = splitSettingsReq(req);
 
         await Promise.all([
-            workHours && this.upsert('expectedWorkHoursSettings', orgId, employeeId, workHours),
-            workDays && this.upsert('workDaySettings', orgId, employeeId, workDays),
-            screenshot && this.upsert('screenshotSettings', orgId, employeeId, screenshot),
-            idleAlert && this.upsert('idleAlertSettings', orgId, employeeId, idleAlert),
-            stealth && this.upsert('stealthMonitoringSettings', orgId, employeeId, stealth),
+            workHours && this.upsert('expectedWorkHoursSetting', orgId, employeeId, workHours),
+            workDays && this.upsert('workDaySetting', orgId, employeeId, workDays),
+            screenshot && this.upsert('screenshotSetting', orgId, employeeId, screenshot),
+            idleAlert && this.upsert('idleAlertSetting', orgId, employeeId, idleAlert),
+            stealth && this.upsert('stealthMonitoringSetting', orgId, employeeId, stealth),
         ]);
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.settings_updated',
@@ -163,12 +165,12 @@ export class EmployeeService {
 
     private async buildSettings(orgId: string, employeeId: string) {
         const [wh, wd, ss, ia, st, od] = await Promise.all([
-            this.db.expectedWorkHoursSettings.findFirst({ where: { employeeId } }),
-            this.db.workDaySettings.findFirst({ where: { employeeId } }),
-            this.db.screenshotSettings.findFirst({ where: { employeeId } }),
-            this.db.idleAlertSettings.findFirst({ where: { employeeId } }),
-            this.db.stealthMonitoringSettings.findFirst({ where: { employeeId } }),
-            this.db.orgDefaultSettings.findFirst({ where: { orgId } }),
+            this.db.expectedWorkHoursSetting.findFirst({ where: { employeeId } }),
+            this.db.workDaySetting.findFirst({ where: { employeeId } }),
+            this.db.screenshotSetting.findFirst({ where: { employeeId } }),
+            this.db.idleAlertSetting.findFirst({ where: { employeeId } }),
+            this.db.stealthMonitoringSetting.findFirst({ where: { employeeId } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
         ]);
         return {
             expectedWorkHoursPerDay: Number(wh?.expectedWorkHoursPerDay ?? od?.defaultWorkHoursPerDay ?? 8),
@@ -193,7 +195,7 @@ export class EmployeeService {
         if (existing) {
             await repo.update({ where: { id: existing.id }, data });
         } else {
-            await repo.create({ data: { orgId, employeeId, ...data } });
+            await repo.create({ data: { id: randomUUID(), orgId, employeeId, updatedAt: new Date(), ...data } });
         }
     }
 }

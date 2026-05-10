@@ -1,4 +1,5 @@
-import type { PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 
 export class RoleService {
@@ -16,7 +17,11 @@ export class RoleService {
 
     async createRole(orgId: string, actorId: string, req: { name: string; permissions?: unknown }) {
         const role = await this.db.role.create({
-            data: { orgId, name: req.name, permissions: req.permissions },
+            data: {
+                id: randomUUID(), orgId, name: req.name,
+                permissions: (req.permissions ?? []) as Prisma.InputJsonValue,
+                updatedAt: new Date(),
+            },
         });
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'role.created',
             orgId, targetType: 'Role', targetId: role.id, after: role.name });
@@ -31,7 +36,11 @@ export class RoleService {
         const before = role.name;
         const updated = await this.db.role.update({
             where: { id: roleId },
-            data: { ...(req.name ? { name: req.name } : {}), ...(req.permissions ? { permissions: req.permissions as object } : {}) },
+            data: {
+                ...(req.name ? { name: req.name } : {}),
+                ...(req.permissions ? { permissions: req.permissions as Prisma.InputJsonValue } : {}),
+                updatedAt: new Date(),
+            },
         });
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'role.updated',

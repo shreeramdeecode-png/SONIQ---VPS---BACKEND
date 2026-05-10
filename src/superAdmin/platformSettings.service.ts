@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 import { paged, type PagedResult } from '../types/common.js';
@@ -26,7 +27,7 @@ export class PlatformSettingsService {
         appCategory?: string;
         defaultStatus: string;
     }) {
-        const entity = await this.db.globalProductivityClassification.create({ data: req });
+        const entity = await this.db.globalProductivityClassification.create({ data: { id: randomUUID(), updatedAt: new Date(), ...req } });
         await this.audit.log({ actorId, actorType: 'SuperAdmin', action: 'classification.created',
             targetType: 'GlobalProductivityClassification', targetId: entity.id, after: req.appNamePattern });
         return entity;

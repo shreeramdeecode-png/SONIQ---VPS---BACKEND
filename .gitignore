@@ -6,3 +6,4 @@ dist/
 prisma/generated/
 *.js.map
 screenshots/
+TODO.md

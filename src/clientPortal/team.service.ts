@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 
@@ -40,7 +41,7 @@ export class TeamService {
     }
 
     async createTeam(orgId: string, actorId: string, name: string) {
-        const team = await this.db.team.create({ data: { orgId, name } });
+        const team = await this.db.team.create({ data: { id: randomUUID(), orgId, name, updatedAt: new Date() } });
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'team.created',
             orgId, targetType: 'Team', targetId: team.id, after: name });
         return { id: team.id, name: team.name, employeeCount: 0, createdAt: team.createdAt };
