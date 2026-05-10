@@ -7,3 +7,4 @@ prisma/generated/
 *.js.map
 screenshots/
 TODO.md
+SETUP.md
