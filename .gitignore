@@ -1,0 +1,1 @@
+node_modules/\ndist/\n.env\n.env.*\n!.env.example\nprisma/generated/\n*.js.map\nscreenshots/

@@ -1,0 +1,48 @@
+{
+  "name": "soniq-node",
+  "version": "1.0.0",
+  "description": "SoniQ API — Node.js/TypeScript rewrite",
+  "type": "module",
+  "main": "dist/app.js",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "db:pull": "prisma db pull",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.741.0",
+    "@aws-sdk/s3-request-presigner": "^3.741.0",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/jwt": "^9.0.4",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^5.2.3",
+    "@fastify/websocket": "^11.0.2",
+    "@prisma/client": "^6.8.2",
+    "axios": "^1.9.0",
+    "axios-retry": "^4.5.0",
+    "bcryptjs": "^3.0.2",
+    "fastify": "^5.3.3",
+    "jsonwebtoken": "^9.0.2",
+    "node-cache": "^5.1.2",
+    "pg-boss": "^10.1.7",
+    "pino": "^9.6.0",
+    "sharp": "^0.33.5",
+    "socket.io": "^4.8.1",
+    "zod": "^3.24.4",
+    "fastify-plugin": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.15.17",
+    "prisma": "^6.8.2",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}
