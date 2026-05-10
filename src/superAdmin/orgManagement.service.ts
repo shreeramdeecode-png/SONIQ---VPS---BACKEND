@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 import { paged, type PagedResult } from '../types/common.js';
@@ -60,6 +61,7 @@ export class OrgManagementService {
         const now = new Date();
         const org = await this.db.organization.create({
             data: {
+                id: randomUUID(), updatedAt: now,
                 name: req.name,
                 contactEmail: req.contactEmail.toLowerCase(),
                 industry: req.industry,
@@ -68,11 +70,12 @@ export class OrgManagementService {
                 phone: req.phone,
                 timezone: req.timezone,
                 status: 'Trial',
-                orgDefaultSettings: {
-                    create: { timezone: req.timezone },
+                orgDefaultSetting: {
+                    create: { id: randomUUID(), timezone: req.timezone, updatedAt: now, defaultWorkDays: {} },
                 },
                 subscription: {
                     create: {
+                        id: randomUUID(), updatedAt: now,
                         planName: req.planName,
                         monthlyAmount: req.monthlyAmount,
                         billingCycle: 'monthly',
@@ -176,16 +179,16 @@ export class OrgManagementService {
     }
 
     async getOrgSettings(orgId: string) {
-        const s = await this.db.orgDefaultSettings.findFirst({ where: { orgId } });
+        const s = await this.db.orgDefaultSetting.findFirst({ where: { orgId } });
         if (!s) throw notFound('OrgSettings', orgId);
         return mapSettings(s);
     }
 
     async updateOrgSettings(actorId: string, orgId: string, req: Record<string, unknown>) {
-        const s = await this.db.orgDefaultSettings.findFirst({ where: { orgId } });
+        const s = await this.db.orgDefaultSetting.findFirst({ where: { orgId } });
         if (!s) throw notFound('OrgSettings', orgId);
 
-        const updated = await this.db.orgDefaultSettings.update({ where: { id: s.id }, data: req });
+        const updated = await this.db.orgDefaultSetting.update({ where: { id: s.id }, data: req });
         await this.audit.log({ actorId, actorType: 'SuperAdmin', action: 'org.settings_updated',
             orgId, targetType: 'OrgDefaultSettings', targetId: s.id });
         return mapSettings(updated);

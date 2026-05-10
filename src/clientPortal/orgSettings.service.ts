@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 
@@ -8,16 +9,16 @@ export class OrgSettingsService {
     ) {}
 
     async getSettings(orgId: string) {
-        const s = await this.db.orgDefaultSettings.findFirst({ where: { orgId } });
+        const s = await this.db.orgDefaultSetting.findFirst({ where: { orgId } });
         return s ?? defaultSettings(orgId);
     }
 
     async updateSettings(orgId: string, actorId: string, req: Record<string, unknown>) {
-        const existing = await this.db.orgDefaultSettings.findFirst({ where: { orgId } });
+        const existing = await this.db.orgDefaultSetting.findFirst({ where: { orgId } });
 
         const s = existing
-            ? await this.db.orgDefaultSettings.update({ where: { id: existing.id }, data: req })
-            : await this.db.orgDefaultSettings.create({ data: { orgId, ...req } });
+            ? await this.db.orgDefaultSetting.update({ where: { id: existing.id }, data: { ...req, updatedAt: new Date() } })
+            : await this.db.orgDefaultSetting.create({ data: { id: randomUUID(), orgId, updatedAt: new Date(), ...(req as any) } });
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'org.settings_updated', orgId });
         return s;
@@ -34,7 +35,7 @@ export class OrgSettingsService {
         appNamePattern: string; appDomainPattern?: string; overriddenStatus: string;
     }) {
         const override = await this.db.orgProductivityOverride.create({
-            data: { orgId, ...req },
+            data: { id: randomUUID(), orgId, updatedAt: new Date(), ...req },
         });
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'org.override_created',
             orgId, targetType: 'OrgProductivityOverride', targetId: override.id, after: req.appNamePattern });

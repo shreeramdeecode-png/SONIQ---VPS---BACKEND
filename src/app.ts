@@ -44,8 +44,6 @@ import { clientScreenshotRoutes } from './routes/client/screenshots.routes.js';
 import { clientReportRoutes } from './routes/client/reports.routes.js';
 import { clientOrgSettingsRoutes } from './routes/client/orgSettings.routes.js';
 
-import './types/fastify.js';
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function getEnv(key: string): string {
