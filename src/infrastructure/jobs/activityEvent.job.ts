@@ -32,15 +32,16 @@ export class ActivityEventJob {
         }
 
         const payload = JSON.parse(data.rawJson);
-        const d = payload.data ?? payload;
+        const item = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+        const activity = item?.activity ?? {};
 
-        const workMode = d.work_mode ?? null;
-        const os = d.operating_system ?? null;
-        const agentVersion = d.agent_version ?? null;
-        const durationSeconds = d.duration_seconds ?? null;
-        const startTime = d.start_time ? new Date(d.start_time) : null;
-        const endTime = d.end_time ? new Date(d.end_time) : null;
-        const trackingMode = d.tracking_mode ?? null;
+        const workMode = activity.workMode ?? null;
+        const os = item?.operatingSystem ?? null;
+        const agentVersion = item?.agentVersion ?? null;
+        const durationSeconds = activity.durationInSeconds ?? null;
+        const startTime = activity.startDate ? new Date(activity.startDate) : null;
+        const endTime = activity.endDate ? new Date(activity.endDate) : null;
+        const trackingMode = activity.trackingMode ?? null;
 
         await this.db.activityEvent.create({
             data: {
