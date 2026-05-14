@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply }
 import { S3Client } from '@aws-sdk/client-s3';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLoggerOptions } from './utils/logger.js';
 import jwt from 'jsonwebtoken';
 
 import prismaPlugin from './plugins/prisma.plugin.js';
@@ -66,7 +67,7 @@ declare module 'fastify' {
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
-    const app = Fastify({ logger: true });
+    const app = Fastify({ logger: getLoggerOptions() });
 
     // ── Raw body capture (required for webhook HMAC validation) ──────────────
     app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
@@ -146,6 +147,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     registerErrorHandler(app);
     registerTenantMiddleware(app);
 
+    // ── Health check ─────────────────────────────────────────────────────────
+    app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
     // ── Routes ────────────────────────────────────────────────────────────────
     await adminAuthRoutes(app, adminAuth);
     await adminOrgRoutes(app, orgMgmt);
@@ -203,6 +207,7 @@ export async function registerJobs(
     });
 
     // Recurring daily summary — every 5 minutes
+    await app.boss.createQueue('daily-summary-cron');
     await app.boss.schedule('daily-summary-cron', '*/5 * * * *', { date: new Date().toISOString() });
     app.boss.work('daily-summary-cron', async () => {
         await dailySummaryJob.execute(new Date());

@@ -7,4 +7,6 @@ prisma/generated/
 *.js.map
 screenshots/
 TODO.md
+logs/
+*.postman_collection.json
 SETUP.md
