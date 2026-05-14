@@ -4,20 +4,16 @@ import { Client } from 'pg';
 export async function setupTestDb(): Promise<() => Promise<void>> {
     const testDbName = `soniq_test_${Date.now()}`;
 
-    // Use TEST_DB_ADMIN_URL if set (needed when the app DB user lacks CREATEDB).
-    // Falls back to DATABASE_URL with the db replaced by 'postgres'.
+    // Connect as the app user itself (requires CREATEDB privilege — run once:
+    // ALTER USER <your_db_user> CREATEDB;)
     const baseUrl  = process.env['DATABASE_URL'] ?? 'postgresql://postgres:postgres@localhost:5432/postgres';
-    const adminUrl = process.env['TEST_DB_ADMIN_URL']
-        ?? baseUrl.replace(/\/[^/\?]+(\?.*)?$/, '/postgres$1');
+    const adminUrl = baseUrl.replace(/\/[^/\?]+(\?.*)?$/, '/postgres$1');
     const testUrl  = baseUrl.replace(/\/[^/\?]+(\?.*)?$/, `/${testDbName}$1`);
 
-    // Extract the app username from DATABASE_URL so the test DB is owned by it
-    const appUser = new URL(baseUrl).username;
-
-    // Create isolated test DB using pg client (no psql binary needed)
+    // Create isolated test DB — app user becomes owner automatically
     const admin = new Client({ connectionString: adminUrl });
     await admin.connect();
-    await admin.query(`CREATE DATABASE "${testDbName}" OWNER "${appUser}"`);
+    await admin.query(`CREATE DATABASE "${testDbName}"`);
     await admin.end();
 
     // Point all env vars at the test DB
@@ -36,7 +32,7 @@ export async function setupTestDb(): Promise<() => Promise<void>> {
     return async () => {
         const cleanup = new Client({ connectionString: adminUrl });
         await cleanup.connect();
-        await cleanup.query(`DROP DATABASE IF EXISTS "${testDbName}"`);
+        await cleanup.query(`DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`);
         await cleanup.end();
     };
 }
