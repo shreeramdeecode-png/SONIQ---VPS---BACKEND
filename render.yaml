@@ -6,7 +6,7 @@ services:
     plan: free
     autoDeploy: false  # GitHub Actions controls deploys
 
-    buildCommand: npm ci && npx prisma generate && npm run build
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
     startCommand: node dist/app.js
 
     healthCheckPath: /health
