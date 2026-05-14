@@ -6,12 +6,12 @@ import type { EncryptionService } from '../infrastructure/encryption.service.js'
 
 interface WebhookPayload {
     event: string;
-    organisationId: string;
-    userId?: string;
-    teamId?: string;
-    trackingId?: string;
-    timestamp?: string;
-    data: unknown;
+    timestamp?: number;
+    data: Record<string, any> | Record<string, any>[];
+}
+
+function extractItem(data: WebhookPayload['data']): Record<string, any> {
+    return Array.isArray(data) ? (data[0] ?? {}) : (data ?? {});
 }
 
 export interface WebhookJobData {
@@ -57,16 +57,24 @@ export async function webhookRoutes(
 
         if (!signature || !timestamp) return reply.status(401).send({ error: 'Unauthorized' });
 
-        // Replay guard: reject events older than 5 minutes
+        // Replay guard: normalize ms or seconds timestamp, reject if older than 5 min
         const ts = parseInt(timestamp, 10);
-        if (isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
+        const tsSeconds = ts > 1e12 ? ts / 1000 : ts;
+        if (isNaN(ts) || Math.abs(Date.now() / 1000 - tsSeconds) > 300) {
             return reply.status(401).send({ error: 'Unauthorized' });
         }
 
         const payload = req.body as WebhookPayload;
 
+        // data can be array (app/screenshot) or object (activity) — always grab first item
+        const item = extractItem(payload.data);
+        const externalOrgId: string = item.organisation?.organisationId ?? '';
+        const externalUserId: string | null = item.user?.userId ?? null;
+        const externalTrackingId: string | null =
+            item.tracking?.trackingId ?? item.screenshot?.screenshotId ?? null;
+
         const orgMapping = await db.agentOrgMapping.findFirst({
-            where: { externalOrgId: payload.organisationId, isActive: true },
+            where: { externalOrgId, isActive: true },
         });
 
         // Decrypt webhook secret before HMAC validation
@@ -98,14 +106,18 @@ export async function webhookRoutes(
             return reply.status(401).send({ error: 'Unauthorized' });
         }
 
+        const occurredAt = payload.timestamp
+            ? new Date(payload.timestamp).toISOString()
+            : new Date().toISOString();
+
         const jobData: WebhookJobData = {
             webhookLogId: log.id,
             eventType: payload.event,
-            externalOrgId: payload.organisationId,
-            externalUserId: payload.userId ?? null,
-            externalTrackingId: payload.trackingId ?? null,
+            externalOrgId,
+            externalUserId,
+            externalTrackingId,
             rawJson: rawBody.toString('utf8'),
-            occurredAt: payload.timestamp ?? new Date().toISOString(),
+            occurredAt,
         };
 
         switch (payload.event) {

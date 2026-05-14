@@ -32,18 +32,21 @@ export class AppEventJob {
         }
 
         const payload = JSON.parse(data.rawJson);
-        const d = payload.data ?? payload;
+        const item = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+        const tracking = item?.tracking ?? {};
+        const app = tracking.app ?? {};
+        const time = tracking.time ?? {};
 
-        const appName: string | null = d.app_name ?? null;
-        const appTypeRaw: string | null = d.app_type ?? null;
-        const appCategory: string | null = d.app_category ?? null;
-        const appDomain: string | null = d.app_domain ?? null;
-        const appFullUrl: string | null = d.app_full_url ?? null;
-        const durationSeconds: number | null = d.duration_seconds ?? null;
-        const startTime = d.start_time ? new Date(d.start_time) : null;
-        const endTime = d.end_time ? new Date(d.end_time) : null;
-        const os: string | null = d.operating_system ?? null;
-        const payloadStatus: string | null = d.productivity_status ?? null;
+        const appName: string | null = app.name ?? null;
+        const appTypeRaw: string | null = app.type ?? null;
+        const appCategory: string | null = app.category ?? null;
+        const appDomain: string | null = app.domain ?? null;
+        const appFullUrl: string | null = app.fullUrl ?? null;
+        const durationSeconds: number | null = time.durationInSeconds ?? null;
+        const startTime = time.startDate ? new Date(time.startDate) : null;
+        const endTime = time.endDate ? new Date(time.endDate) : null;
+        const os: string | null = tracking.operatingSystem ?? null;
+        const payloadStatus: string | null = app.productivityStatus ?? null;
 
         const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
 
