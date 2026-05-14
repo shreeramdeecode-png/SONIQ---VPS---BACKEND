@@ -1,46 +1,42 @@
 import { execSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { Client } from 'pg';
 
 export async function setupTestDb(): Promise<() => Promise<void>> {
-    // Use dedicated test database on the same PG18 instance
     const testDbName = `soniq_test_${Date.now()}`;
-    const adminConnStr = `postgresql://postgres:Admin@123@localhost:5433/postgres`;
-    const testConnStr = `postgresql://postgres:Admin@123@localhost:5433/${testDbName}`;
 
-    // Create isolated test DB
-    execSync(
-        `"C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe" -h 127.0.0.1 -p 5433 -U postgres ` +
-        `-c "CREATE DATABASE ${testDbName};"`,
-        { env: { ...process.env, PGPASSWORD: 'Admin@123' } },
-    );
+    // Use TEST_DB_ADMIN_URL if set (needed when the app DB user lacks CREATEDB).
+    // Falls back to DATABASE_URL with the db replaced by 'postgres'.
+    const baseUrl  = process.env['DATABASE_URL'] ?? 'postgresql://postgres:postgres@localhost:5432/postgres';
+    const adminUrl = process.env['TEST_DB_ADMIN_URL']
+        ?? baseUrl.replace(/\/[^/\?]+(\?.*)?$/, '/postgres$1');
+    const testUrl  = baseUrl.replace(/\/[^/\?]+(\?.*)?$/, `/${testDbName}$1`);
 
-    // Apply schema via EF migrations
-    execSync(
-        `dotnet ef database update ` +
-        `--project src/Soniq.Infrastructure/Soniq.Infrastructure.csproj ` +
-        `--startup-project src/Soniq.API/Soniq.API.csproj`,
-        {
-            cwd: 'C:\\Users\\PS\\Gokul\\SoniQ',
-            env: {
-                ...process.env,
-                ConnectionStrings__Default:
-                    `Host=localhost;Port=5433;Database=${testDbName};Username=postgres;Password=Admin@123`,
-            },
-        },
-    );
+    // Extract the app username from DATABASE_URL so the test DB is owned by it
+    const appUser = new URL(baseUrl).username;
 
-    // Point Prisma at the test DB
-    process.env['DATABASE_URL'] = testConnStr;
-    process.env['JWT_SECRET_CLIENT'] = 'test-client-secret-minimum-32-chars!!';
-    process.env['JWT_SECRET_SUPERADMIN'] = 'test-admin-secret-minimum-32-chars!!';
-    process.env['ENCRYPTION_KEY'] = Buffer.alloc(32).toString('base64');
-    process.env['TRACKPILOTS_BASE_URL'] = 'https://api.trackpilots.com';
+    // Create isolated test DB using pg client (no psql binary needed)
+    const admin = new Client({ connectionString: adminUrl });
+    await admin.connect();
+    await admin.query(`CREATE DATABASE "${testDbName}" OWNER "${appUser}"`);
+    await admin.end();
+
+    // Point all env vars at the test DB
+    process.env['DATABASE_URL']           = testUrl;
+    process.env['JWT_SECRET_CLIENT']      = 'test-client-secret-minimum-32-chars!!';
+    process.env['JWT_SECRET_SUPERADMIN']  = 'test-admin-secret-minimum-32-chars!!';
+    process.env['ENCRYPTION_KEY']         = Buffer.alloc(32).toString('base64');
+    process.env['TRACKPILOTS_BASE_URL']   = 'https://api.trackpilots.com';
+
+    // Apply schema via Prisma (cross-platform, no dotnet ef needed)
+    execSync('npx prisma db push --skip-generate', {
+        env: { ...process.env, DATABASE_URL: testUrl },
+        stdio: 'pipe',
+    });
 
     return async () => {
-        execSync(
-            `"C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe" -h 127.0.0.1 -p 5433 -U postgres ` +
-            `-c "DROP DATABASE IF EXISTS ${testDbName};"`,
-            { env: { ...process.env, PGPASSWORD: 'Admin@123' } },
-        );
+        const cleanup = new Client({ connectionString: adminUrl });
+        await cleanup.connect();
+        await cleanup.query(`DROP DATABASE IF EXISTS "${testDbName}"`);
+        await cleanup.end();
     };
 }
