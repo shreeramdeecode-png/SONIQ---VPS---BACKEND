@@ -78,4 +78,21 @@ export async function adminOrgRoutes(app: FastifyInstance, svc: OrgManagementSer
         const { page, pageSize } = req.query as Record<string, string>;
         return svc.getAuditLogs(id, Number(page ?? 1), Number(pageSize ?? 50));
     });
+
+    app.get('/api/admin/orgs/:id/agent-mapping', { preHandler: [auth] }, async (req) => {
+        const { id } = req.params as { id: string };
+        return svc.getAgentMapping(id);
+    });
+
+    app.post('/api/admin/orgs/:id/agent-mapping', { preHandler: [auth] }, async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const result = await svc.upsertAgentMapping(req.user['sub'] as string, id, req.body as any);
+        return reply.status(201).send(result);
+    });
+
+    app.delete('/api/admin/orgs/:id/agent-mapping', { preHandler: [auth] }, async (req, reply) => {
+        const { id } = req.params as { id: string };
+        await svc.deleteAgentMapping(req.user['sub'] as string, id);
+        return reply.status(204).send();
+    });
 }

@@ -129,7 +129,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     );
 
     // SuperAdmin
-    const orgMgmt = new OrgManagementService(app.prisma, audit);
+    const orgMgmt = new OrgManagementService(app.prisma, audit, encryption);
     const dashboard = new DashboardService(app.prisma);
     const platformSettings = new PlatformSettingsService(app.prisma, audit);
 
