@@ -6,25 +6,10 @@
       "type": "node",
       "request": "attach",
       "port": 9229,
-      "restart": true,
+      "restart": false,
       "sourceMaps": true,
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/src/**",
-        "!**/node_modules/**"
-      ],
-      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
-    },
-    {
-      "name": "Launch Dev Server",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:debug"],
-      "port": 9229,
-      "restart": true,
-      "sourceMaps": true,
-      "resolveSourceMapLocations": [
-        "${workspaceFolder}/src/**",
+        "${workspaceFolder}/**",
         "!**/node_modules/**"
       ],
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
