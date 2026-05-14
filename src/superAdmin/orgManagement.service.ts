@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
+import type { EncryptionService } from '../infrastructure/encryption.service.js';
 import { paged, type PagedResult } from '../types/common.js';
 
 export class OrgManagementService {
     constructor(
         private readonly db: PrismaClient,
         private readonly audit: AuditService,
+        private readonly encryption: EncryptionService,
     ) {}
 
     async listOrgs(page = 1, pageSize = 20, search?: string): Promise<PagedResult<unknown>> {
@@ -209,6 +211,71 @@ export class OrgManagementService {
         await this.audit.log({ actorId, actorType: 'SuperAdmin', action: 'org.billing_updated',
             orgId, targetType: 'Subscription', targetId: sub.id, before, after: updated.planName });
         return mapSub(updated);
+    }
+
+    async getAgentMapping(orgId: string) {
+        const mapping = await this.db.agentOrgMapping.findFirst({ where: { orgId } });
+        if (!mapping) throw notFound('AgentOrgMapping', orgId);
+        return {
+            id: mapping.id,
+            orgId: mapping.orgId,
+            agentProvider: mapping.agentProvider,
+            externalOrgId: mapping.externalOrgId,
+            isActive: mapping.isActive,
+            createdAt: mapping.createdAt,
+            updatedAt: mapping.updatedAt,
+        };
+    }
+
+    async upsertAgentMapping(actorId: string, orgId: string, req: {
+        externalOrgId: string;
+        apiKey: string;
+        webhookSecret: string;
+        agentProvider?: string;
+    }) {
+        const org = await this.db.organization.findFirst({ where: { id: orgId, deletedAt: null } });
+        if (!org) throw notFound('Organization', orgId);
+
+        const now = new Date();
+        const data = {
+            agentProvider: req.agentProvider ?? 'trackpilots',
+            externalOrgId: req.externalOrgId,
+            apiKeyEncrypted: this.encryption.encrypt(req.apiKey),
+            webhookSecretEncrypted: this.encryption.encrypt(req.webhookSecret),
+            isActive: true,
+            updatedAt: now,
+        };
+
+        const existing = await this.db.agentOrgMapping.findFirst({ where: { orgId } });
+        const mapping = existing
+            ? await this.db.agentOrgMapping.update({ where: { id: existing.id }, data })
+            : await this.db.agentOrgMapping.create({ data: { id: randomUUID(), orgId, createdAt: now, ...data } });
+
+        await this.audit.log({
+            actorId, actorType: 'SuperAdmin',
+            action: existing ? 'org.agent_mapping_updated' : 'org.agent_mapping_created',
+            orgId, targetType: 'AgentOrgMapping', targetId: mapping.id,
+        });
+
+        return {
+            id: mapping.id,
+            orgId: mapping.orgId,
+            agentProvider: mapping.agentProvider,
+            externalOrgId: mapping.externalOrgId,
+            isActive: mapping.isActive,
+            createdAt: mapping.createdAt,
+            updatedAt: mapping.updatedAt,
+        };
+    }
+
+    async deleteAgentMapping(actorId: string, orgId: string) {
+        const mapping = await this.db.agentOrgMapping.findFirst({ where: { orgId } });
+        if (!mapping) throw notFound('AgentOrgMapping', orgId);
+        await this.db.agentOrgMapping.update({ where: { id: mapping.id }, data: { isActive: false, updatedAt: new Date() } });
+        await this.audit.log({
+            actorId, actorType: 'SuperAdmin', action: 'org.agent_mapping_deactivated',
+            orgId, targetType: 'AgentOrgMapping', targetId: mapping.id,
+        });
     }
 
     async getAuditLogs(orgId: string, page = 1, pageSize = 50): Promise<PagedResult<unknown>> {
