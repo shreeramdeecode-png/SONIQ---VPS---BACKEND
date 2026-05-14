@@ -82,10 +82,24 @@ export async function webhookRoutes(
         if (orgMapping) {
             try {
                 const decryptedSecret = encryption.decrypt(orgMapping.webhookSecretEncrypted);
+                const signingPayload = `${timestamp}.${rawBody.toString('utf8')}`;
+                const computed = createHmac('sha256', decryptedSecret)
+                    .update(signingPayload, 'utf8')
+                    .digest('hex');
+                app.log.info({
+                    webhookDebug: true,
+                    receivedSignature: signature,
+                    computedSignature: computed,
+                    timestamp,
+                    rawBodyLength: rawBody.length,
+                    signingPayloadPreview: signingPayload.slice(0, 100),
+                }, 'Webhook signature debug');
                 signatureValid = validateSignature(rawBody, signature, timestamp, decryptedSecret);
             } catch {
                 signatureValid = false;
             }
+        } else {
+            app.log.warn({ externalOrgId }, 'No agent mapping found for externalOrgId');
         }
 
         const log = await db.webhookLog.create({
