@@ -55,12 +55,25 @@ export async function webhookRoutes(
         const signature = (req.headers['x-webhook-signature'] as string) ?? '';
         const timestamp = (req.headers['x-webhook-timestamp'] as string) ?? '';
 
-        if (!signature || !timestamp) return reply.status(401).send({ error: 'Unauthorized' });
+        app.log.info({
+            webhookHeaders: req.headers,
+            hasSignature: !!signature,
+            hasTimestamp: !!timestamp,
+            signature,
+            timestamp,
+        }, 'Webhook incoming headers');
+
+        if (!signature || !timestamp) {
+            app.log.warn({ signature, timestamp }, 'Webhook rejected: missing signature or timestamp');
+            return reply.status(401).send({ error: 'Unauthorized' });
+        }
 
         // Replay guard: normalize ms or seconds timestamp, reject if older than 5 min
         const ts = parseInt(timestamp, 10);
         const tsSeconds = ts > 1e12 ? ts / 1000 : ts;
-        if (isNaN(ts) || Math.abs(Date.now() / 1000 - tsSeconds) > 300) {
+        const ageDiff = Math.abs(Date.now() / 1000 - tsSeconds);
+        if (isNaN(ts) || ageDiff > 300) {
+            app.log.warn({ timestamp, ts, tsSeconds, ageDiff }, 'Webhook rejected: replay guard');
             return reply.status(401).send({ error: 'Unauthorized' });
         }
 
