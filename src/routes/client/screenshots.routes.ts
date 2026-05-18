@@ -12,6 +12,7 @@ export async function clientScreenshotRoutes(app: FastifyInstance, svc: Screensh
             to: q['to'] ? new Date(q['to']) : undefined,
             page: Number(q['page'] ?? 1),
             pageSize: Number(q['pageSize'] ?? 30),
+            productivityStatus: q['productivityStatus'],
         });
     });
 
