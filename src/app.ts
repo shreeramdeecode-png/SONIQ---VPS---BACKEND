@@ -27,6 +27,7 @@ import { ScreenshotEventJob } from './infrastructure/jobs/screenshotEvent.job.js
 import { DailySummaryJob } from './infrastructure/jobs/dailySummary.job.js';
 
 import { OrgManagementService } from './superAdmin/orgManagement.service.js';
+import { AgentSyncService } from './superAdmin/agentSync.service.js';
 import { DashboardService } from './superAdmin/dashboard.service.js';
 import { PlatformSettingsService } from './superAdmin/platformSettings.service.js';
 
@@ -124,13 +125,14 @@ export async function buildApp(): Promise<FastifyInstance> {
         )
         : new LocalFileStorage(join(__dirname, '..', 'screenshots'));
 
-    const _trackpilots = new TrackpilotsService(
+    const trackpilots = new TrackpilotsService(
         process.env['TRACKPILOTS_BASE_URL'] ?? 'https://api.trackpilots.com',
         app.prisma, encryption,
     );
 
     // SuperAdmin
     const orgMgmt = new OrgManagementService(app.prisma, audit, encryption);
+    const agentSync = new AgentSyncService(app.prisma, trackpilots, audit);
     const dashboard = new DashboardService(app.prisma);
     const platformSettings = new PlatformSettingsService(app.prisma, audit);
 
@@ -155,7 +157,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
     // ── Routes ────────────────────────────────────────────────────────────────
     await adminAuthRoutes(app, adminAuth);
-    await adminOrgRoutes(app, orgMgmt);
+    await adminOrgRoutes(app, orgMgmt, agentSync);
     await adminDashboardRoutes(app, dashboard, platformSettings);
 
     await clientAuthRoutes(app, clientAuth);
