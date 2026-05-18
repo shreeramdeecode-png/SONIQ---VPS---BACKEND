@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { toCsv } from '../utils/csvExport.js';
 
 export class AttendanceService {
     constructor(private readonly db: PrismaClient) {}
@@ -58,4 +59,68 @@ export class AttendanceService {
             screenshotsCount: s.screenshotsCount,
         }));
     }
+
+    async getAttendanceTimeline(orgId: string, date: Date, teamId?: string) {
+        const dayStart = toUtcDay(date);
+        const dayEnd = new Date(dayStart.getTime() + 86400000);
+
+        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+        const employees = await this.db.employee.findMany({
+            where: empWhere,
+            select: { id: true, name: true, team: { select: { name: true } } },
+            orderBy: { name: 'asc' },
+        });
+
+        const events = await this.db.activityEvent.findMany({
+            where: {
+                orgId,
+                eventType: 'App',
+                startTime: { gte: dayStart, lt: dayEnd },
+                employeeId: { in: employees.map(e => e.id) },
+            },
+            select: { employeeId: true, appName: true, productivityStatus: true, startTime: true, endTime: true, durationSeconds: true },
+            orderBy: { startTime: 'asc' },
+        });
+
+        const byEmployee = new Map<string, typeof events>();
+        for (const ev of events) {
+            const g = byEmployee.get(ev.employeeId) ?? [];
+            g.push(ev);
+            byEmployee.set(ev.employeeId, g);
+        }
+
+        return employees.map(e => ({
+            employeeId: e.id,
+            name: e.name,
+            teamName: e.team?.name ?? null,
+            segments: (byEmployee.get(e.id) ?? []).map(ev => ({
+                appName: ev.appName,
+                productivityStatus: ev.productivityStatus,
+                startTime: ev.startTime,
+                endTime: ev.endTime,
+                durationSeconds: ev.durationSeconds,
+            })),
+        }));
+    }
+
+    async exportAttendanceCsv(orgId: string, date: Date, teamId?: string): Promise<string> {
+        const rows = await this.getDailyAttendance(orgId, date, teamId);
+        return toCsv(rows.map(r => ({
+            'Employee ID': r.employeeId,
+            'Name': r.name,
+            'Team': r.teamName ?? '',
+            'Present': r.isPresent ? 'Yes' : 'No',
+            'First Check-in': r.firstCheckin ? r.firstCheckin.toISOString() : '',
+            'Last Check-out': r.lastCheckout ? r.lastCheckout.toISOString() : '',
+            'Total Work (hrs)': (r.totalWorkSeconds / 3600).toFixed(2),
+            'Productive (hrs)': (r.productiveSeconds / 3600).toFixed(2),
+            'Productivity Score': r.productivityScore != null ? String(r.productivityScore) : '',
+            'Late': r.isLate ? 'Yes' : 'No',
+            'Screenshots': String(r.screenshotsCount),
+        })));
+    }
+}
+
+function toUtcDay(d: Date): Date {
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
