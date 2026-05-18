@@ -11,6 +11,15 @@ export async function clientTeamRoutes(app: FastifyInstance, svc: TeamService) {
         return svc.getTeam(req.orgId, id);
     });
 
+    app.get('/api/client/teams/:id/calendar', { preHandler: [auth] }, async (req) => {
+        const { id } = req.params as { id: string };
+        const q = req.query as Record<string, string>;
+        const now = new Date();
+        const year = Number(q['year'] ?? now.getUTCFullYear());
+        const month = Number(q['month'] ?? now.getUTCMonth() + 1);
+        return svc.getTeamCalendar(req.orgId, id, year, month);
+    });
+
     app.post('/api/client/teams', { preHandler: [auth] }, async (req, reply) => {
         const { name } = req.body as { name: string };
         const result = await svc.createTeam(req.orgId, req.actorId, name);
