@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { OrgManagementService } from '../../superAdmin/orgManagement.service.js';
+import type { AgentSyncService } from '../../superAdmin/agentSync.service.js';
 
-export async function adminOrgRoutes(app: FastifyInstance, svc: OrgManagementService) {
+export async function adminOrgRoutes(app: FastifyInstance, svc: OrgManagementService, sync: AgentSyncService) {
     const auth = app.authenticate('admin');
 
     app.get('/api/admin/orgs', { preHandler: [auth] }, async (req) => {
@@ -77,5 +78,11 @@ export async function adminOrgRoutes(app: FastifyInstance, svc: OrgManagementSer
         const { id } = req.params as { id: string };
         const { page, pageSize } = req.query as Record<string, string>;
         return svc.getAuditLogs(id, Number(page ?? 1), Number(pageSize ?? 50));
+    });
+
+    app.post('/api/admin/orgs/:id/agent-sync', { preHandler: [auth] }, async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const report = await sync.syncOrg(req.user['sub'] as string, id);
+        return reply.status(200).send(report);
     });
 }
