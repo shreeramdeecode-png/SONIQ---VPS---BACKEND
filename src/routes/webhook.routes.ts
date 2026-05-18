@@ -6,12 +6,12 @@ import type { EncryptionService } from '../infrastructure/encryption.service.js'
 
 interface WebhookPayload {
     event: string;
-    organisationId: string;
-    userId?: string;
-    teamId?: string;
-    trackingId?: string;
-    timestamp?: string;
-    data: unknown;
+    timestamp?: number;
+    data: Record<string, any> | Record<string, any>[];
+}
+
+function extractItem(data: WebhookPayload['data']): Record<string, any> {
+    return Array.isArray(data) ? (data[0] ?? {}) : (data ?? {});
 }
 
 export interface WebhookJobData {
@@ -50,23 +50,44 @@ export async function webhookRoutes(
     boss: PgBoss,
     encryption: EncryptionService,
 ) {
-    app.post('/api/webhooks/ingest', async (req, reply) => {
+    app.post('/webhooks/trackpilots', async (req, reply) => {
         const rawBody: Buffer = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
         const signature = (req.headers['x-webhook-signature'] as string) ?? '';
         const timestamp = (req.headers['x-webhook-timestamp'] as string) ?? '';
 
-        if (!signature || !timestamp) return reply.status(401).send({ error: 'Unauthorized' });
+        app.log.info({
+            webhookHeaders: req.headers,
+            hasSignature: !!signature,
+            hasTimestamp: !!timestamp,
+            signature,
+            timestamp,
+        }, 'Webhook incoming headers');
 
-        // Replay guard: reject events older than 5 minutes
+        if (!signature || !timestamp) {
+            app.log.warn({ signature, timestamp }, 'Webhook rejected: missing signature or timestamp');
+            return reply.status(401).send({ error: 'Unauthorized' });
+        }
+
+        // Replay guard: normalize ms or seconds timestamp, reject if older than 5 min
         const ts = parseInt(timestamp, 10);
-        if (isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
+        const tsSeconds = ts > 1e12 ? ts / 1000 : ts;
+        const ageDiff = Math.abs(Date.now() / 1000 - tsSeconds);
+        if (isNaN(ts) || ageDiff > 300) {
+            app.log.warn({ timestamp, ts, tsSeconds, ageDiff }, 'Webhook rejected: replay guard');
             return reply.status(401).send({ error: 'Unauthorized' });
         }
 
         const payload = req.body as WebhookPayload;
 
+        // data can be array (app/screenshot) or object (activity) — always grab first item
+        const item = extractItem(payload.data);
+        const externalOrgId: string = item.organisation?.organisationId ?? '';
+        const externalUserId: string | null = item.user?.userId ?? null;
+        const externalTrackingId: string | null =
+            item.tracking?.trackingId ?? item.screenshot?.screenshotId ?? null;
+
         const orgMapping = await db.agentOrgMapping.findFirst({
-            where: { externalOrgId: payload.organisationId, isActive: true },
+            where: { externalOrgId, isActive: true },
         });
 
         // Decrypt webhook secret before HMAC validation
@@ -74,10 +95,24 @@ export async function webhookRoutes(
         if (orgMapping) {
             try {
                 const decryptedSecret = encryption.decrypt(orgMapping.webhookSecretEncrypted);
+                const signingPayload = `${timestamp}.${rawBody.toString('utf8')}`;
+                const computed = createHmac('sha256', decryptedSecret)
+                    .update(signingPayload, 'utf8')
+                    .digest('hex');
+                app.log.info({
+                    webhookDebug: true,
+                    receivedSignature: signature,
+                    computedSignature: computed,
+                    timestamp,
+                    rawBodyLength: rawBody.length,
+                    signingPayloadPreview: signingPayload.slice(0, 100),
+                }, 'Webhook signature debug');
                 signatureValid = validateSignature(rawBody, signature, timestamp, decryptedSecret);
             } catch {
                 signatureValid = false;
             }
+        } else {
+            app.log.warn({ externalOrgId }, 'No agent mapping found for externalOrgId');
         }
 
         const log = await db.webhookLog.create({
@@ -98,14 +133,18 @@ export async function webhookRoutes(
             return reply.status(401).send({ error: 'Unauthorized' });
         }
 
+        const occurredAt = payload.timestamp
+            ? new Date(payload.timestamp).toISOString()
+            : new Date().toISOString();
+
         const jobData: WebhookJobData = {
             webhookLogId: log.id,
             eventType: payload.event,
-            externalOrgId: payload.organisationId,
-            externalUserId: payload.userId ?? null,
-            externalTrackingId: payload.trackingId ?? null,
+            externalOrgId,
+            externalUserId,
+            externalTrackingId,
             rawJson: rawBody.toString('utf8'),
-            occurredAt: payload.timestamp ?? new Date().toISOString(),
+            occurredAt,
         };
 
         switch (payload.event) {

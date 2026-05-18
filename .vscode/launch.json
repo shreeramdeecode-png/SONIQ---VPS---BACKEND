@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach to Dev Server",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": false,
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { createHash, randomBytes } from 'node:crypto';
 
-const ACCESS_TOKEN_MINUTES = 60;
+const ADMIN_ACCESS_TOKEN_HOURS = 8;
+const CLIENT_ACCESS_TOKEN_HOURS = 4;
 const REFRESH_TOKEN_DAYS = 30;
 
 export interface AdminTokenPayload {
@@ -35,7 +36,7 @@ export class TokenService {
             role: 'super_admin',
             jti: randomBytes(16).toString('hex'),
         };
-        return jwt.sign(payload, this.adminSecret, { expiresIn: `${ACCESS_TOKEN_MINUTES}m` });
+        return jwt.sign(payload, this.adminSecret, { expiresIn: `${ADMIN_ACCESS_TOKEN_HOURS}h` });
     }
 
     generateClientAccessToken(args: {
@@ -53,7 +54,7 @@ export class TokenService {
             role: args.roleName,
             jti: randomBytes(16).toString('hex'),
         };
-        return jwt.sign(payload, this.clientSecret, { expiresIn: `${ACCESS_TOKEN_MINUTES}m` });
+        return jwt.sign(payload, this.clientSecret, { expiresIn: `${CLIENT_ACCESS_TOKEN_HOURS}h` });
     }
 
     generateRefreshToken(): string {
@@ -72,7 +73,16 @@ export class TokenService {
         return jwt.verify(token, this.clientSecret) as ClientTokenPayload;
     }
 
+    adminTokenExpiresAt(): Date {
+        return new Date(Date.now() + ADMIN_ACCESS_TOKEN_HOURS * 60 * 60 * 1000);
+    }
+
+    clientTokenExpiresAt(): Date {
+        return new Date(Date.now() + CLIENT_ACCESS_TOKEN_HOURS * 60 * 60 * 1000);
+    }
+
     refreshTokenExpiresAt(): Date {
+        // Called on every token issue (login + refresh) — this makes the window sliding
         const d = new Date();
         d.setDate(d.getDate() + REFRESH_TOKEN_DAYS);
         return d;
