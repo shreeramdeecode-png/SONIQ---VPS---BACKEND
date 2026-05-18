@@ -50,7 +50,7 @@ export async function webhookRoutes(
     boss: PgBoss,
     encryption: EncryptionService,
 ) {
-    app.post('/api/webhooks/ingest', async (req, reply) => {
+    app.post('/webhooks/trackpilots', async (req, reply) => {
         const rawBody: Buffer = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
         const signature = (req.headers['x-webhook-signature'] as string) ?? '';
         const timestamp = (req.headers['x-webhook-timestamp'] as string) ?? '';

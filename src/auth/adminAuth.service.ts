@@ -61,7 +61,7 @@ export class AdminAuthService {
     private async issueTokens(admin: { id: string; email: string; name: string }) {
         const accessToken = this.tokens.generateAdminAccessToken(admin);
         const refreshToken = this.tokens.generateRefreshToken();
-        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+        const expiresAt = this.tokens.adminTokenExpiresAt();
 
         await this.db.superAdmin.update({
             where: { id: admin.id },

@@ -72,6 +72,7 @@ export class ScreenshotEventJob {
         const appTypeRaw: string | null = app.type ?? null;
         const appCategory: string | null = app.category ?? null;
         const appFullUrl: string | null = app.fullUrl ?? null;
+        const productivityStatus: string | null = app.productivityStatus ?? null;
         const isIdle: boolean = screenshot.isIdle ?? false;
         const os: string | null = screenshot.operatingSystem ?? null;
         const workType: string | null = screenshot.workType ?? null;
@@ -106,7 +107,7 @@ export class ScreenshotEventJob {
                 thumbnailUrl: thumbKey,
                 isBlurred: blurEnabled,
                 appName, appType, appCategory, appDomain, appFullUrl,
-                isIdle, operatingSystem: os, workType, capturedAt,
+                productivityStatus, isIdle, operatingSystem: os, workType, capturedAt,
             },
         });
 
