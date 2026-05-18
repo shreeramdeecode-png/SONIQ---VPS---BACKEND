@@ -1,0 +1,437 @@
+{
+  "info": {
+    "name": "SoniQ API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "adminToken", "value": "" },
+    { "key": "clientToken", "value": "" },
+    { "key": "adminRefreshToken", "value": "" },
+    { "key": "clientRefreshToken", "value": "" },
+    { "key": "orgId", "value": "" },
+    { "key": "employeeId", "value": "" },
+    { "key": "teamId", "value": "" },
+    { "key": "roleId", "value": "" },
+    { "key": "classificationId", "value": "" },
+    { "key": "screenshotId", "value": "" },
+    { "key": "resetToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Admin / Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.accessToken) bru.setVar('adminToken', r.accessToken);", "if (r.refreshToken) bru.setVar('adminRefreshToken', r.refreshToken);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/auth/login", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"info@deecodes.io\",\n  \"password\": \"Deecodes@321\"\n}" } }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.accessToken) bru.setVar('adminToken', r.accessToken);", "if (r.refreshToken) bru.setVar('adminRefreshToken', r.refreshToken);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/auth/refresh", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\"\n}" } }
+        },
+        {
+          "name": "Validate Token",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/auth/validate", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/auth/logout", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\"\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Admin / Organizations",
+      "item": [
+        {
+          "name": "List Orgs",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/orgs?page=1&pageSize=20", "host": ["{{baseUrl}}"], "path": ["api", "admin", "orgs"], "query": [{ "key": "page", "value": "1" }, { "key": "pageSize", "value": "20" }, { "key": "search", "value": "", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Get Org",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Create Org",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.id) bru.setVar('orgId', r.id);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/orgs", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Acme Corp\",\n  \"contactEmail\": \"owner@acme.com\",\n  \"industry\": \"Technology\",\n  \"timezone\": \"Asia/Kolkata\",\n  \"planName\": \"pro\",\n  \"monthlyAmount\": 99,\n  \"maxEmployees\": 50,\n  \"maxStorageGb\": 100,\n  \"dataRetentionDays\": 90,\n  \"trialDays\": 30\n}" } }
+        },
+        {
+          "name": "Update Org",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Acme Corporation\"\n}" } }
+        },
+        {
+          "name": "Suspend Org",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/suspend", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Reactivate Org",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/reactivate", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Delete Org",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Get Org Employees",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/orgs/{{orgId}}/employees?page=1&pageSize=20", "host": ["{{baseUrl}}"], "path": ["api", "admin", "orgs", "{{orgId}}", "employees"], "query": [{ "key": "page", "value": "1" }, { "key": "pageSize", "value": "20" }] }, "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Get Org Teams",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/teams", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Get Org Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/settings", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Update Org Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/settings", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"defaultCaptureIntervalMinutes\": 10,\n  \"defaultBlurEnabled\": false,\n  \"defaultStealthEnabled\": false,\n  \"defaultScreenshotEnabled\": true\n}" } }
+        },
+        {
+          "name": "Get Org Billing",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/billing", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Update Org Billing",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/billing", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"planName\": \"pro\",\n  \"maxEmployees\": 50,\n  \"maxStorageGb\": 100,\n  \"status\": \"active\",\n  \"expiresAt\": \"2027-01-01T00:00:00.000Z\"\n}" } }
+        },
+        {
+          "name": "Get Audit Logs",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/orgs/{{orgId}}/audit-logs?page=1&pageSize=50", "host": ["{{baseUrl}}"], "path": ["api", "admin", "orgs", "{{orgId}}", "audit-logs"], "query": [{ "key": "page", "value": "1" }, { "key": "pageSize", "value": "50" }] }, "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Get Agent Mapping",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/agent-mapping", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Upsert Agent Mapping",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/agent-mapping", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"externalOrgId\": \"\",\n  \"apiKey\": \"\",\n  \"webhookSecret\": \"\",\n  \"agentProvider\": \"trackpilots\"\n}" } }
+        },
+        {
+          "name": "Delete Agent Mapping",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/agent-mapping", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Agent Sync",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/orgs/{{orgId}}/agent-sync", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Admin / Dashboard & Platform Settings",
+      "item": [
+        {
+          "name": "Dashboard Stats",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/dashboard/stats", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "List Classifications",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/platform-settings/classifications?page=1&pageSize=50", "host": ["{{baseUrl}}"], "path": ["api", "admin", "platform-settings", "classifications"], "query": [{ "key": "page", "value": "1" }, { "key": "pageSize", "value": "50" }] }, "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        },
+        {
+          "name": "Create Classification",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.id) bru.setVar('classificationId', r.id);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/admin/platform-settings/classifications", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"appNamePattern\": \"Slack\",\n  \"appCategory\": \"communication\",\n  \"defaultStatus\": \"neutral\"\n}" } }
+        },
+        {
+          "name": "Update Classification",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/admin/platform-settings/classifications/{{classificationId}}", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"defaultStatus\": \"productive\"\n}" } }
+        },
+        {
+          "name": "Delete Classification",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/admin/platform-settings/classifications/{{classificationId}}", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Client / Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.accessToken) bru.setVar('clientToken', r.accessToken);", "if (r.refreshToken) bru.setVar('clientRefreshToken', r.refreshToken);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/login", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"john@acme.com\",\n  \"password\": \"Employee@123\"\n}" } }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.accessToken) bru.setVar('clientToken', r.accessToken);", "if (r.refreshToken) bru.setVar('clientRefreshToken', r.refreshToken);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/refresh", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{clientRefreshToken}}\"\n}" } }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/logout", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{clientRefreshToken}}\"\n}" } }
+        },
+        {
+          "name": "Forgot Password",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/forgot-password", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"john@acme.com\"\n}" } }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.resetToken) bru.setVar('resetToken', r.resetToken);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/verify-otp", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"john@acme.com\",\n  \"otp\": \"123456\"\n}" } }
+        },
+        {
+          "name": "Reset Password",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/reset-password", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"resetToken\": \"{{resetToken}}\",\n  \"newPassword\": \"NewPass@123\"\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Client / Dashboard",
+      "item": [
+        {
+          "name": "Today Stats",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/stats", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "stats"], "query": [{ "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Top Productive Employees",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/top-productive?limit=5", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "top-productive"], "query": [{ "key": "limit", "value": "5" }, { "key": "date", "value": "2026-05-15", "disabled": true }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Top Unproductive Employees",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/top-unproductive?limit=5", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "top-unproductive"], "query": [{ "key": "limit", "value": "5" }, { "key": "date", "value": "2026-05-15", "disabled": true }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Top Apps",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/top-apps?from=2026-05-15&to=2026-05-15&limit=10", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "top-apps"], "query": [{ "key": "from", "value": "2026-05-15" }, { "key": "to", "value": "2026-05-15" }, { "key": "limit", "value": "10" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Activity Table",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/activity-table", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "activity-table"], "query": [{ "key": "date", "value": "2026-05-15", "disabled": true }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Work Hour Chart",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/work-hour-chart?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "work-hour-chart"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Work Mode Summary",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/work-mode-summary", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "work-mode-summary"], "query": [{ "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Recent Screenshots",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/recent-screenshots?limit=20", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "recent-screenshots"], "query": [{ "key": "limit", "value": "20" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Team Comparison",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/dashboard/team-comparison", "host": ["{{baseUrl}}"], "path": ["api", "client", "dashboard", "team-comparison"], "query": [{ "key": "date", "value": "2026-05-15", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Client / Teams",
+      "item": [
+        {
+          "name": "List Teams",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/teams", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Get Team",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/teams/{{teamId}}", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Team Calendar",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/teams/{{teamId}}/calendar?year=2026&month=5", "host": ["{{baseUrl}}"], "path": ["api", "client", "teams", "{{teamId}}", "calendar"], "query": [{ "key": "year", "value": "2026" }, { "key": "month", "value": "5" }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Create Team",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.id) bru.setVar('teamId', r.id);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/client/teams", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Engineering\"\n}" } }
+        },
+        {
+          "name": "Update Team",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/teams/{{teamId}}", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Engineering Team\"\n}" } }
+        },
+        {
+          "name": "Delete Team",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/client/teams/{{teamId}}", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Client / Employees",
+      "item": [
+        {
+          "name": "List Employees",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/employees?page=1&pageSize=20", "host": ["{{baseUrl}}"], "path": ["api", "client", "employees"], "query": [{ "key": "page", "value": "1" }, { "key": "pageSize", "value": "20" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }, { "key": "search", "value": "", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Get Employee",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Invite Employee",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.id) bru.setVar('employeeId', r.id);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/client/employees/invite", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"newemployee@acme.com\",\n  \"name\": \"Jane Doe\",\n  \"teamId\": \"{{teamId}}\",\n  \"roleId\": \"{{roleId}}\"\n}" } }
+        },
+        {
+          "name": "Update Employee",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jane Smith\",\n  \"teamId\": \"{{teamId}}\"\n}" } }
+        },
+        {
+          "name": "Deactivate Employee",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/deactivate", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Get All Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Get Work Day Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/work-days", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Update Work Day Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/work-days", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"monday\": true,\n  \"tuesday\": true,\n  \"wednesday\": true,\n  \"thursday\": true,\n  \"friday\": true,\n  \"saturday\": false,\n  \"sunday\": false\n}" } }
+        },
+        {
+          "name": "Get Work Hour Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/work-hours", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Update Work Hour Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/work-hours", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"expectedWorkHoursPerDay\": 8,\n  \"expectedProductiveHoursPerDay\": 6,\n  \"expectedInTime\": \"09:00\"\n}" } }
+        },
+        {
+          "name": "Get Screenshot Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/screenshot", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Update Screenshot Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/screenshot", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"screenCaptureEnabled\": true,\n  \"blurEnabled\": false,\n  \"captureIntervalMinutes\": 10\n}" } }
+        },
+        {
+          "name": "Get Idle Alert Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/idle-alert", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Update Idle Alert Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/idle-alert", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"idleAlertEnabled\": true,\n  \"minIdleTimeMinutes\": 10\n}" } }
+        },
+        {
+          "name": "Get Stealth Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/stealth", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Update Stealth Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/employees/{{employeeId}}/settings/stealth", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"stealthEnabled\": true,\n  \"consentAcknowledged\": true\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Client / Attendance",
+      "item": [
+        {
+          "name": "Daily Attendance",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/attendance/daily?date=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "attendance", "daily"], "query": [{ "key": "date", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Employee Attendance Range",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/attendance/employees/{{employeeId}}?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "attendance", "employees", "{{employeeId}}"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Attendance Timeline",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/attendance/timeline?date=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "attendance", "timeline"], "query": [{ "key": "date", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Export Attendance CSV",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/attendance/export?date=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "attendance", "export"], "query": [{ "key": "date", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Client / Screenshots",
+      "item": [
+        {
+          "name": "List Screenshots",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.data && r.data[0]) bru.setVar('screenshotId', r.data[0].id);"] } }],
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/screenshots?page=1&pageSize=30", "host": ["{{baseUrl}}"], "path": ["api", "client", "screenshots"], "query": [{ "key": "page", "value": "1" }, { "key": "pageSize", "value": "30" }, { "key": "employeeId", "value": "{{employeeId}}", "disabled": true }, { "key": "from", "value": "2026-05-01", "disabled": true }, { "key": "to", "value": "2026-05-15", "disabled": true }, { "key": "productivityStatus", "value": "productive", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Toggle Blur",
+          "request": { "method": "PATCH", "url": "{{baseUrl}}/api/client/screenshots/{{screenshotId}}/blur", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"blur\": true\n}" } }
+        }
+      ]
+    },
+    {
+      "name": "Client / Reports",
+      "item": [
+        {
+          "name": "Productivity Trend",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/reports/productivity-trend?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "reports", "productivity-trend"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "App Usage",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/reports/app-usage?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "reports", "app-usage"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "employeeId", "value": "{{employeeId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Effort Utilization",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/reports/effort?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "reports", "effort"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Attendance Report",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/reports/attendance?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "reports", "attendance"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Timesheet Report",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/reports/timesheet?from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "reports", "timesheet"], "query": [{ "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "employeeId", "value": "{{employeeId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Export Report CSV",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/client/reports/export?type=productivity&from=2026-05-01&to=2026-05-15", "host": ["{{baseUrl}}"], "path": ["api", "client", "reports", "export"], "query": [{ "key": "type", "value": "productivity" }, { "key": "from", "value": "2026-05-01" }, { "key": "to", "value": "2026-05-15" }, { "key": "teamId", "value": "{{teamId}}", "disabled": true }, { "key": "employeeId", "value": "{{employeeId}}", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Client / Org Settings & Roles",
+      "item": [
+        {
+          "name": "Get Settings",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/settings", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Update Settings",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/settings", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"defaultCaptureIntervalMinutes\": 10,\n  \"defaultBlurEnabled\": false,\n  \"defaultStealthEnabled\": false,\n  \"defaultScreenshotEnabled\": true\n}" } }
+        },
+        {
+          "name": "List Overrides",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/settings/overrides", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Create Override",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/client/settings/overrides", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"appNamePattern\": \"YouTube\",\n  \"overriddenStatus\": \"unproductive\"\n}" } }
+        },
+        {
+          "name": "Delete Override",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/client/settings/overrides/{{employeeId}}", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "List Roles",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/client/roles", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        },
+        {
+          "name": "Create Role",
+          "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.id) bru.setVar('roleId', r.id);"] } }],
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/client/roles", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Manager\",\n  \"permissions\": [\"view_reports\", \"manage_teams\"]\n}" } }
+        },
+        {
+          "name": "Update Role",
+          "request": { "method": "PUT", "url": "{{baseUrl}}/api/client/roles/{{roleId}}", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{clientToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Senior Manager\",\n  \"permissions\": [\"view_reports\", \"manage_teams\", \"manage_employees\"]\n}" } }
+        },
+        {
+          "name": "Delete Role",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/client/roles/{{roleId}}", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Ingest (TrackPilots)",
+          "request": { "method": "POST", "url": "{{baseUrl}}/webhooks/trackpilots", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "x-webhook-signature", "value": "" }, { "key": "x-webhook-timestamp", "value": "" }], "body": { "mode": "raw", "raw": "{\n  \"event\": \"desktop.app_tracking.captured\",\n  \"version\": \"v1\",\n  \"timestamp\": 1778767301328,\n  \"data\": []\n}" } }
+        }
+      ]
+    }
+  ]
+}

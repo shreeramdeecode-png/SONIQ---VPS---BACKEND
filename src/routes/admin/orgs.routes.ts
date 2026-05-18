@@ -80,6 +80,11 @@ export async function adminOrgRoutes(app: FastifyInstance, svc: OrgManagementSer
         return svc.getAuditLogs(id, Number(page ?? 1), Number(pageSize ?? 50));
     });
 
+    app.post('/api/admin/orgs/:id/agent-sync', { preHandler: [auth] }, async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const report = await sync.syncOrg(req.user['sub'] as string, id);
+        return reply.status(200).send(report);
+
     app.get('/api/admin/orgs/:id/agent-mapping', { preHandler: [auth] }, async (req) => {
         const { id } = req.params as { id: string };
         return svc.getAgentMapping(id);
@@ -95,11 +100,5 @@ export async function adminOrgRoutes(app: FastifyInstance, svc: OrgManagementSer
         const { id } = req.params as { id: string };
         await svc.deleteAgentMapping(req.user['sub'] as string, id);
         return reply.status(204).send();
-    });
-
-    app.post('/api/admin/orgs/:id/agent-sync', { preHandler: [auth] }, async (req, reply) => {
-        const { id } = req.params as { id: string };
-        const report = await sync.syncOrg(req.user['sub'] as string, id);
-        return reply.status(200).send(report);
     });
 }
