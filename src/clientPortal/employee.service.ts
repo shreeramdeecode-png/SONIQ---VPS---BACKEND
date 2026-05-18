@@ -144,6 +144,139 @@ export class EmployeeService {
         return this.buildSettings(orgId, employeeId);
     }
 
+    async getWorkDaySettings(orgId: string, employeeId: string) {
+        await this.assertEmployee(orgId, employeeId);
+        const [wd, od] = await Promise.all([
+            this.db.workDaySetting.findFirst({ where: { employeeId } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
+        ]);
+        return {
+            monday: wd?.monday ?? true, tuesday: wd?.tuesday ?? true,
+            wednesday: wd?.wednesday ?? true, thursday: wd?.thursday ?? true,
+            friday: wd?.friday ?? true, saturday: wd?.saturday ?? false,
+            sunday: wd?.sunday ?? false,
+        };
+    }
+
+    async updateWorkDaySettings(orgId: string, actorId: string, employeeId: string, req: {
+        monday?: boolean; tuesday?: boolean; wednesday?: boolean; thursday?: boolean;
+        friday?: boolean; saturday?: boolean; sunday?: boolean;
+    }) {
+        await this.assertEmployee(orgId, employeeId);
+        await this.upsert('workDaySetting', orgId, employeeId, req);
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.work_days_updated',
+            orgId, targetType: 'Employee', targetId: employeeId });
+        return this.getWorkDaySettings(orgId, employeeId);
+    }
+
+    async getWorkHourSettings(orgId: string, employeeId: string) {
+        await this.assertEmployee(orgId, employeeId);
+        const [wh, od] = await Promise.all([
+            this.db.expectedWorkHoursSetting.findFirst({ where: { employeeId } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
+        ]);
+        return {
+            expectedWorkHoursPerDay: Number(wh?.expectedWorkHoursPerDay ?? od?.defaultWorkHoursPerDay ?? 8),
+            expectedProductiveHoursPerDay: Number(wh?.expectedProductiveHoursPerDay ?? od?.defaultProductiveHoursPerDay ?? 6),
+            expectedInTime: wh?.expectedInTime ?? od?.defaultExpectedInTime ?? '08:00',
+        };
+    }
+
+    async updateWorkHourSettings(orgId: string, actorId: string, employeeId: string, req: {
+        expectedWorkHoursPerDay?: number; expectedProductiveHoursPerDay?: number; expectedInTime?: string;
+    }) {
+        await this.assertEmployee(orgId, employeeId);
+        await this.upsert('expectedWorkHoursSetting', orgId, employeeId, req);
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.work_hours_updated',
+            orgId, targetType: 'Employee', targetId: employeeId });
+        return this.getWorkHourSettings(orgId, employeeId);
+    }
+
+    async getScreenshotSettings(orgId: string, employeeId: string) {
+        await this.assertEmployee(orgId, employeeId);
+        const [ss, od] = await Promise.all([
+            this.db.screenshotSetting.findFirst({ where: { employeeId } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
+        ]);
+        return {
+            screenCaptureEnabled: ss?.screenCaptureEnabled ?? od?.defaultScreenshotEnabled ?? true,
+            blurEnabled: ss?.blurEnabled ?? od?.defaultBlurEnabled ?? false,
+            captureIntervalMinutes: ss?.captureIntervalMinutes ?? od?.defaultCaptureIntervalMinutes ?? 1,
+        };
+    }
+
+    async updateScreenshotSettings(orgId: string, actorId: string, employeeId: string, req: {
+        screenCaptureEnabled?: boolean; blurEnabled?: boolean; captureIntervalMinutes?: number;
+    }) {
+        await this.assertEmployee(orgId, employeeId);
+        await this.upsert('screenshotSetting', orgId, employeeId, req);
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.screenshot_settings_updated',
+            orgId, targetType: 'Employee', targetId: employeeId });
+        return this.getScreenshotSettings(orgId, employeeId);
+    }
+
+    async getIdleAlertSettings(orgId: string, employeeId: string) {
+        await this.assertEmployee(orgId, employeeId);
+        const [ia, od] = await Promise.all([
+            this.db.idleAlertSetting.findFirst({ where: { employeeId } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
+        ]);
+        return {
+            idleAlertEnabled: ia?.idleAlertEnabled ?? od?.defaultIdleAlertEnabled ?? true,
+            minIdleTimeMinutes: ia?.minIdleTimeMinutes ?? od?.defaultMinIdleTimeMinutes ?? 5,
+        };
+    }
+
+    async updateIdleAlertSettings(orgId: string, actorId: string, employeeId: string, req: {
+        idleAlertEnabled?: boolean; minIdleTimeMinutes?: number;
+    }) {
+        await this.assertEmployee(orgId, employeeId);
+        await this.upsert('idleAlertSetting', orgId, employeeId, req);
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.idle_alert_updated',
+            orgId, targetType: 'Employee', targetId: employeeId });
+        return this.getIdleAlertSettings(orgId, employeeId);
+    }
+
+    async getStealthSettings(orgId: string, employeeId: string) {
+        await this.assertEmployee(orgId, employeeId);
+        const [st, od] = await Promise.all([
+            this.db.stealthMonitoringSetting.findFirst({ where: { employeeId } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
+        ]);
+        return {
+            stealthEnabled: st?.stealthEnabled ?? od?.defaultStealthEnabled ?? false,
+            consentAcknowledged: st?.consentAcknowledged ?? false,
+            consentAcknowledgedAt: st?.consentAcknowledgedAt ?? null,
+        };
+    }
+
+    async updateStealthSettings(orgId: string, actorId: string, employeeId: string, req: {
+        stealthEnabled: boolean; consentAcknowledged?: boolean;
+    }) {
+        await this.assertEmployee(orgId, employeeId);
+        if (req.stealthEnabled && !req.consentAcknowledged) {
+            throw Object.assign(
+                new Error('Stealth monitoring requires explicit consent acknowledgement.'),
+                { statusCode: 400 },
+            );
+        }
+        const data: Record<string, unknown> = { stealthEnabled: req.stealthEnabled, updatedAt: new Date() };
+        if (req.stealthEnabled && req.consentAcknowledged) {
+            data['consentAcknowledged'] = true;
+            data['consentAcknowledgedAt'] = new Date();
+            data['consentAcknowledgedBy'] = actorId;
+        }
+        await this.upsert('stealthMonitoringSetting', orgId, employeeId, data);
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.stealth_updated',
+            orgId, targetType: 'Employee', targetId: employeeId });
+        return this.getStealthSettings(orgId, employeeId);
+    }
+
+    private async assertEmployee(orgId: string, employeeId: string) {
+        const e = await this.db.employee.findFirst({ where: { id: employeeId, orgId, deletedAt: null } });
+        if (!e) throw notFound('Employee', employeeId);
+    }
+
     async updateSettings(orgId: string, actorId: string, employeeId: string, req: Record<string, unknown>) {
         const exists = await this.db.employee.findFirst({ where: { id: employeeId, orgId, deletedAt: null } });
         if (!exists) throw notFound('Employee', employeeId);
