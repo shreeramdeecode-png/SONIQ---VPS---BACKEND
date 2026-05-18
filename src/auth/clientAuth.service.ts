@@ -146,7 +146,7 @@ export class ClientAuthService {
             roleName: auth.employee.role.name,
         });
         const refreshToken = this.tokens.generateRefreshToken();
-        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+        const expiresAt = this.tokens.clientTokenExpiresAt();
 
         await this.db.clientAuth.update({
             where: { id: auth.id },
