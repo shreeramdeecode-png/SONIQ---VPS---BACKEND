@@ -6,11 +6,13 @@ export class ScreenshotService {
 
     async listScreenshots(orgId: string, opts: {
         employeeId?: string; from?: Date; to?: Date; page?: number; pageSize?: number;
+        productivityStatus?: string;
     } = {}): Promise<PagedResult<unknown>> {
-        const { employeeId, from, to, page = 1, pageSize = 30 } = opts;
+        const { employeeId, from, to, page = 1, pageSize = 30, productivityStatus } = opts;
         const where = {
             orgId,
             ...(employeeId ? { employeeId } : {}),
+            ...(productivityStatus ? { productivityStatus } : {}),
             ...(from || to ? {
                 capturedAt: {
                     ...(from ? { gte: from } : {}),

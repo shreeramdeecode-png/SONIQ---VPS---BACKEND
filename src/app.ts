@@ -2,12 +2,14 @@ import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply }
 import { S3Client } from '@aws-sdk/client-s3';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLoggerOptions } from './utils/logger.js';
 import jwt from 'jsonwebtoken';
 
 import prismaPlugin from './plugins/prisma.plugin.js';
 import pgbossPlugin from './plugins/pgboss.plugin.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
 import { registerTenantMiddleware } from './middleware/tenant.js';
+import { createPermissionGuard } from './middleware/permissions.js';
 
 import { EncryptionService } from './infrastructure/encryption.service.js';
 import { AuditService } from './infrastructure/audit.service.js';
@@ -67,7 +69,7 @@ declare module 'fastify' {
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
-    const app = Fastify({ logger: true });
+    const app = Fastify({ logger: getLoggerOptions() });
 
     // ── Raw body capture (required for webhook HMAC validation) ──────────────
     app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
@@ -129,8 +131,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     );
 
     // SuperAdmin
-    const orgMgmt = new OrgManagementService(app.prisma, audit);
     const agentSync = new AgentSyncService(app.prisma, trackpilots, audit);
+    const orgMgmt = new OrgManagementService(app.prisma, audit, encryption);
     const dashboard = new DashboardService(app.prisma);
     const platformSettings = new PlatformSettingsService(app.prisma, audit);
 
@@ -148,6 +150,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     registerErrorHandler(app);
     registerTenantMiddleware(app);
 
+    const perm = createPermissionGuard(app.prisma);
+
+    // ── Health check ─────────────────────────────────────────────────────────
+    app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
     // ── Routes ────────────────────────────────────────────────────────────────
     await adminAuthRoutes(app, adminAuth);
     await adminOrgRoutes(app, orgMgmt, agentSync);
@@ -156,7 +163,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await clientAuthRoutes(app, clientAuth);
     await clientDashboardRoutes(app, clientDashboard);
     await clientTeamRoutes(app, teams);
-    await clientEmployeeRoutes(app, employees);
+    await clientEmployeeRoutes(app, employees, perm);
     await clientAttendanceRoutes(app, attendance);
     await clientScreenshotRoutes(app, screenshots);
     await clientReportRoutes(app, reports);
@@ -205,6 +212,7 @@ export async function registerJobs(
     });
 
     // Recurring daily summary — every 5 minutes
+    await app.boss.createQueue('daily-summary-cron');
     await app.boss.schedule('daily-summary-cron', '*/5 * * * *', { date: new Date().toISOString() });
     app.boss.work('daily-summary-cron', async () => {
         await dailySummaryJob.execute(new Date());

@@ -54,29 +54,43 @@ export class ScreenshotEventJob {
         const blurEnabled = screenshotSetting?.blurEnabled ?? orgDefault?.defaultBlurEnabled ?? false;
 
         const payload = JSON.parse(data.rawJson);
-        const d = payload.data ?? payload;
+        const item = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+        const screenshot = item?.screenshot ?? {};
+        const app = screenshot.app ?? {};
+        const time = screenshot.time ?? {};
 
-        const imageUrl: string | null = d.image_url ?? null;
-        if (!imageUrl) {
+        // imageBuffer can be base64 string or a URL — skip if simulation placeholder
+        const imageBuffer: string | null = screenshot.imageBuffer ?? null;
+        const isSimulation = !imageBuffer || imageBuffer.startsWith('[simulation');
+        if (isSimulation) {
+            await markLog(this.db, data.webhookLogId, 'Processed');
+            return;
+        }
+
+        const appName: string | null = app.name ?? null;
+        const appDomain: string | null = app.domain ?? null;
+        const appTypeRaw: string | null = app.type ?? null;
+        const appCategory: string | null = app.category ?? null;
+        const appFullUrl: string | null = app.fullUrl ?? null;
+        const productivityStatus: string | null = app.productivityStatus ?? null;
+        const isIdle: boolean = screenshot.isIdle ?? false;
+        const os: string | null = screenshot.operatingSystem ?? null;
+        const workType: string | null = screenshot.workType ?? null;
+        const capturedAt = time.capturedAt ? new Date(time.capturedAt) : new Date(data.occurredAt);
+        const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
+
+        // Resolve imageUrl: HTTP URL → download, base64 → decode directly
+        const imageUrl = imageBuffer.startsWith('http') ? imageBuffer : null;
+        const imageBase64 = !imageBuffer.startsWith('http') ? imageBuffer : null;
+        if (!imageUrl && !imageBase64) {
             await markLog(this.db, data.webhookLogId, 'Failed');
             return;
         }
 
-        const appName: string | null = d.app_name ?? null;
-        const appDomain: string | null = d.app_domain ?? null;
-        const appTypeRaw: string | null = d.app_type ?? null;
-        const appCategory: string | null = d.app_category ?? null;
-        const appFullUrl: string | null = d.app_full_url ?? null;
-        const isIdle: boolean = d.is_idle ?? false;
-        const os: string | null = d.operating_system ?? null;
-        const workType: string | null = d.work_type ?? null;
-        const capturedAt = d.captured_at ? new Date(d.captured_at) : new Date(data.occurredAt);
-        const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
-
         const screenshotId = crypto.randomUUID();
         const keyPrefix = `${mapping.orgId}/${mapping.employeeId}/${screenshotId}`;
 
-        const { fullKey, thumbKey } = await this.downloadAndUpload(imageUrl, keyPrefix, blurEnabled);
+        const { fullKey, thumbKey } = await this.downloadAndUpload(imageUrl, imageBase64, keyPrefix, blurEnabled);
 
         const dayStart = new Date(Date.UTC(
             capturedAt.getUTCFullYear(), capturedAt.getUTCMonth(), capturedAt.getUTCDate(),
@@ -93,7 +107,7 @@ export class ScreenshotEventJob {
                 thumbnailUrl: thumbKey,
                 isBlurred: blurEnabled,
                 appName, appType, appCategory, appDomain, appFullUrl,
-                isIdle, operatingSystem: os, workType, capturedAt,
+                productivityStatus, isIdle, operatingSystem: os, workType, capturedAt,
             },
         });
 
@@ -112,10 +126,15 @@ export class ScreenshotEventJob {
     }
 
     private async downloadAndUpload(
-        sourceUrl: string, keyPrefix: string, blur: boolean,
+        sourceUrl: string | null, sourceBase64: string | null, keyPrefix: string, blur: boolean,
     ): Promise<{ fullKey: string; thumbKey: string }> {
-        const res = await axios.get(sourceUrl, { responseType: 'arraybuffer' });
-        let buf = Buffer.from(res.data as ArrayBuffer);
+        let buf: Buffer;
+        if (sourceUrl) {
+            const res = await axios.get(sourceUrl, { responseType: 'arraybuffer' });
+            buf = Buffer.from(res.data as ArrayBuffer);
+        } else {
+            buf = Buffer.from(sourceBase64!, 'base64');
+        }
 
         if (blur) {
             buf = Buffer.from(await sharp(buf).blur(10).jpeg().toBuffer());
