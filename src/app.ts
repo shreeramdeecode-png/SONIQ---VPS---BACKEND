@@ -9,6 +9,7 @@ import prismaPlugin from './plugins/prisma.plugin.js';
 import pgbossPlugin from './plugins/pgboss.plugin.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
 import { registerTenantMiddleware } from './middleware/tenant.js';
+import { createPermissionGuard } from './middleware/permissions.js';
 
 import { EncryptionService } from './infrastructure/encryption.service.js';
 import { AuditService } from './infrastructure/audit.service.js';
@@ -147,6 +148,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     registerErrorHandler(app);
     registerTenantMiddleware(app);
 
+    const perm = createPermissionGuard(app.prisma);
+
     // ── Health check ─────────────────────────────────────────────────────────
     app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
@@ -158,7 +161,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await clientAuthRoutes(app, clientAuth);
     await clientDashboardRoutes(app, clientDashboard);
     await clientTeamRoutes(app, teams);
-    await clientEmployeeRoutes(app, employees);
+    await clientEmployeeRoutes(app, employees, perm);
     await clientAttendanceRoutes(app, attendance);
     await clientScreenshotRoutes(app, screenshots);
     await clientReportRoutes(app, reports);
