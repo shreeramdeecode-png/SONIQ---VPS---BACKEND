@@ -15,7 +15,13 @@
     { "key": "roleId", "value": "" },
     { "key": "classificationId", "value": "" },
     { "key": "screenshotId", "value": "" },
-    { "key": "resetToken", "value": "" }
+    { "key": "resetToken", "value": "" },
+    { "key": "tpBaseUrl", "value": "https://api.trackpilots.com" },
+    { "key": "tpApiKey", "value": "" },
+    { "key": "tpOrgId", "value": "" },
+    { "key": "tpTeamId", "value": "" },
+    { "key": "tpUserId", "value": "" },
+    { "key": "tpRoleId", "value": "" }
   ],
   "item": [
     {
@@ -421,6 +427,145 @@
         {
           "name": "Delete Role",
           "request": { "method": "DELETE", "url": "{{baseUrl}}/api/client/roles/{{roleId}}", "header": [{ "key": "Authorization", "value": "Bearer {{clientToken}}" }] }
+        }
+      ]
+    },
+    {
+      "name": "TrackPilots API (Direct)",
+      "item": [
+        {
+          "name": "Teams",
+          "item": [
+            {
+              "name": "Fetch All Teams",
+              "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.data && r.data[0]) bru.setVar('tpTeamId', r.data[0].teamId);"] } }],
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/teams", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Create Team",
+              "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.data && r.data.teamId) bru.setVar('tpTeamId', r.data.teamId);"] } }],
+              "request": { "method": "POST", "url": "{{tpBaseUrl}}/v1/teams", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"teamName\": \"Engineering\"\n}" } }
+            },
+            {
+              "name": "Update Team",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/teams", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"teamId\": \"{{tpTeamId}}\",\n  \"teamName\": \"Engineering Team\"\n}" } }
+            },
+            {
+              "name": "Delete Team",
+              "request": { "method": "DELETE", "url": "{{tpBaseUrl}}/v1/teams", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"teamId\": \"{{tpTeamId}}\"\n}" } }
+            },
+            {
+              "name": "Fetch Teams by IDs",
+              "request": { "method": "POST", "url": "{{tpBaseUrl}}/v1/teams/filter", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"teamIds\": [\"{{tpTeamId}}\"]\n}" } }
+            }
+          ]
+        },
+        {
+          "name": "Employees",
+          "item": [
+            {
+              "name": "Fetch All Employees",
+              "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.data && r.data[0]) bru.setVar('tpUserId', r.data[0].userId);"] } }],
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/employees", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Add Employee",
+              "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.response && r.response.userId) bru.setVar('tpUserId', r.response.userId);"] } }],
+              "request": { "method": "POST", "url": "{{tpBaseUrl}}/v1/employees", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userName\": \"Jane Doe\",\n  \"emailId\": \"jane@acme.com\",\n  \"roleId\": \"{{tpRoleId}}\",\n  \"teamId\": [\"{{tpTeamId}}\"],\n  \"workMode\": \"office\"\n}" } }
+            },
+            {
+              "name": "Add Employee via Invite Link",
+              "request": { "method": "POST", "url": "{{tpBaseUrl}}/v1/employees/send-invite-link", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userName\": \"Jane Doe\",\n  \"emailId\": \"jane@acme.com\",\n  \"roleId\": \"{{tpRoleId}}\",\n  \"teamId\": [\"{{tpTeamId}}\"]\n}" } }
+            },
+            {
+              "name": "Update Employee",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/employees", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\",\n  \"userName\": \"Jane Smith\",\n  \"roleId\": \"{{tpRoleId}}\",\n  \"teamId\": [\"{{tpTeamId}}\"],\n  \"workMode\": \"remote\"\n}" } }
+            },
+            {
+              "name": "Delete Employee",
+              "request": { "method": "DELETE", "url": "{{tpBaseUrl}}/v1/employees", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\"\n}" } }
+            },
+            {
+              "name": "Fetch Employees by IDs",
+              "request": { "method": "POST", "url": "{{tpBaseUrl}}/v1/employees/filter", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userIds\": [\"{{tpUserId}}\"]\n}" } }
+            }
+          ]
+        },
+        {
+          "name": "Settings",
+          "item": [
+            {
+              "name": "Get Work Day Settings",
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/settings/work-day", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Update Work Day Settings",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/settings/work-day", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\",\n  \"workDays\": [\"monday\", \"tuesday\", \"wednesday\", \"thursday\", \"friday\"]\n}" } }
+            },
+            {
+              "name": "Get Expected Work Hours Settings",
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/settings/expected-work-hours", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Update Expected Work Hours Settings",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/settings/expected-work-hours", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\",\n  \"expectedWorkMinutesPerDay\": 480,\n  \"expectedProductiveWorkMinutesPerDay\": 360,\n  \"expectedInTime\": \"09:00\"\n}" } }
+            },
+            {
+              "name": "Get Screenshot Settings",
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/settings/screenshot", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Update Screenshot Settings",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/settings/screenshot", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\",\n  \"enableScreenCapture\": true,\n  \"enableBlurScreenCapture\": false,\n  \"screenCaptureIntervalMinutes\": 10\n}" } }
+            },
+            {
+              "name": "Get Idle Alert Settings",
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/settings/idle-alert", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Update Idle Alert Settings",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/settings/idle-alert", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\",\n  \"enableIdleTimeAlert\": true,\n  \"minimumIdleTimeMinutes\": 5\n}" } }
+            },
+            {
+              "name": "Get Stealth Monitoring Settings",
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/settings/stealth-monitoring", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Update Stealth Monitoring Settings",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/settings/stealth-monitoring", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{tpUserId}}\",\n  \"enableStealthMonitoring\": false\n}" } }
+            },
+            {
+              "name": "Get Default Settings",
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/settings/default-setting", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Update Default Settings",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/settings/default-setting", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"workDaySettings\": {\n    \"workDays\": [\"monday\", \"tuesday\", \"wednesday\", \"thursday\", \"friday\"]\n  },\n  \"workHourSettings\": {\n    \"expectedWorkMinutesPerDay\": 480,\n    \"expectedProductiveWorkMinutesPerDay\": 360,\n    \"expectedInTime\": \"09:00\"\n  },\n  \"screenshotSettings\": {\n    \"enableScreenCapture\": true,\n    \"enableBlurScreenCapture\": false,\n    \"screenCaptureIntervalMinutes\": 10\n  },\n  \"idleAlertSettings\": {\n    \"enableIdleTimeAlert\": true,\n    \"minimumIdleTimeMinutes\": 5\n  },\n  \"stealthMonitoringSettings\": {\n    \"enableStealthMonitoring\": false\n  },\n  \"timezoneSettings\": {\n    \"timezone\": \"Asia/Kolkata\"\n  }\n}" } }
+            }
+          ]
+        },
+        {
+          "name": "Access Management (Roles)",
+          "item": [
+            {
+              "name": "Fetch Access Roles",
+              "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.data && r.data[0]) bru.setVar('tpRoleId', r.data[0].roleId);"] } }],
+              "request": { "method": "GET", "url": "{{tpBaseUrl}}/v1/access-management", "header": [{ "key": "Authorization", "value": "Bearer {{tpApiKey}}" }] }
+            },
+            {
+              "name": "Create Access Role",
+              "event": [{ "listen": "test", "script": { "exec": ["const r = res.getBody();", "if (r.data && r.data.roleId) bru.setVar('tpRoleId', r.data.roleId);"] } }],
+              "request": { "method": "POST", "url": "{{tpBaseUrl}}/v1/access-management", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"roleName\": \"Manager\",\n  \"roleData\": [\n    { \"path\": \"Dashboard\", \"access\": \"Full Access\" },\n    { \"path\": \"My Team\", \"access\": \"Team Data\" },\n    { \"path\": \"Insights\", \"access\": \"Team Data\" },\n    { \"path\": \"Proof of Work\", \"access\": \"Team Data\" },\n    { \"path\": \"Report Analysis\", \"access\": \"Team Data\" }\n  ]\n}" } }
+            },
+            {
+              "name": "Update Access Role",
+              "request": { "method": "PATCH", "url": "{{tpBaseUrl}}/v1/access-management", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"roleId\": \"{{tpRoleId}}\",\n  \"roleName\": \"Senior Manager\",\n  \"roleData\": [\n    { \"path\": \"Dashboard\", \"access\": \"Full Access\" },\n    { \"path\": \"My Team\", \"access\": \"Full Access\" },\n    { \"path\": \"Insights\", \"access\": \"Full Access\" },\n    { \"path\": \"Proof of Work\", \"access\": \"Full Access\" },\n    { \"path\": \"Report Analysis\", \"access\": \"Full Access\" }\n  ]\n}" } }
+            },
+            {
+              "name": "Delete Access Role",
+              "request": { "method": "DELETE", "url": "{{tpBaseUrl}}/v1/access-management", "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{tpApiKey}}" }], "body": { "mode": "raw", "raw": "{\n  \"roleId\": \"{{tpRoleId}}\"\n}" } }
+            }
+          ]
         }
       ]
     },
