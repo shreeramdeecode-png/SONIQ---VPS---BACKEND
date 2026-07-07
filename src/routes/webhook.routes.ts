@@ -72,7 +72,7 @@ export async function webhookRoutes(
         const ts = parseInt(timestamp, 10);
         const tsSeconds = ts > 1e12 ? ts / 1000 : ts;
         const ageDiff = Math.abs(Date.now() / 1000 - tsSeconds);
-        if (isNaN(ts) || ageDiff > 300) {
+        if (isNaN(ts) || ageDiff > 86400) {
             app.log.warn({ timestamp, ts, tsSeconds, ageDiff }, 'Webhook rejected: replay guard');
             return reply.status(401).send({ error: 'Unauthorized' });
         }

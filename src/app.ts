@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
+import cors from '@fastify/cors';
 import { S3Client } from '@aws-sdk/client-s3';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +72,11 @@ declare module 'fastify' {
 export async function buildApp(): Promise<FastifyInstance> {
     const app = Fastify({ logger: getLoggerOptions() });
 
+    await app.register(cors, {
+       origin: ['https://soniq.deecodes.io'],
+    credentials: true,
+    });
+
     // ── Raw body capture (required for webhook HMAC validation) ──────────────
     app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
         (req as any).rawBody = body as Buffer;
@@ -95,7 +101,12 @@ export async function buildApp(): Promise<FastifyInstance> {
             const token = header.slice(7);
             const secret = scheme === 'admin' ? adminSecret : clientSecret;
             try {
-                req.user = jwt.verify(token, secret) as Record<string, unknown>;
+                const decoded = jwt.verify(token, secret) as Record<string, any>;
+                req.user = decoded;
+                if (decoded['org_id']) {
+                    req.orgId = decoded['org_id'] as string;
+                    req.actorId = (decoded['sub'] as string) ?? '';
+                }
             } catch {
                 return reply.status(401).send({ error: 'Unauthorized' });
             }
@@ -142,11 +153,20 @@ export async function buildApp(): Promise<FastifyInstance> {
     const employees = new EmployeeService(app.prisma, audit, passwords);
     const roles = new RoleService(app.prisma, audit);
     const attendance = new AttendanceService(app.prisma);
-    const screenshots = new ScreenshotService(app.prisma);
+    const screenshots = new ScreenshotService(app.prisma, storage);
     const reports = new ReportsService(app.prisma);
     const orgSettings = new OrgSettingsService(app.prisma, audit);
 
     // ── Middleware ────────────────────────────────────────────────────────────
+    // Serve locally-stored screenshots
+    app.get('/screenshots/*', async (req, reply) => {
+        const { createReadStream } = await import('node:fs');
+        const { join: pjoin } = await import('node:path');
+        const key = (req.params as any)['*'];
+        const filePath = pjoin(__dirname, '..', 'screenshots', ...key.split('/'));
+        return reply.type('image/jpeg').send(createReadStream(filePath));
+    });
+
     registerErrorHandler(app);
     registerTenantMiddleware(app);
 

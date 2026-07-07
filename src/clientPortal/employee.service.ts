@@ -2,7 +2,18 @@ import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 import type { PasswordService } from '../auth/password.service.js';
 import { paged, type PagedResult } from '../types/common.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createDecipheriv } from 'node:crypto';
+
+function decryptApiKey(ciphertext: string, keyBase64: string): string {
+    const key = Buffer.from(keyBase64, 'base64');
+    const buf = Buffer.from(ciphertext, 'base64');
+    const nonce = buf.subarray(0, 12);
+    const tag = buf.subarray(buf.length - 16);
+    const ct = buf.subarray(12, buf.length - 16);
+    const decipher = createDecipheriv('aes-256-gcm', key, nonce);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+}
 
 export class EmployeeService {
     constructor(
@@ -90,8 +101,34 @@ export class EmployeeService {
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.invited',
             orgId, targetType: 'Employee', targetId: employee.id, after: employee.email });
 
-        // TODO: send invite email
-        console.log(`[Invite] ${employee.email} invited to /set-password`);
+        // Send Trackpilots invite
+        try {
+            const orgMapping = await this.db.agentOrgMapping.findFirst({
+                where: { orgId, agentProvider: 'trackpilots' }, select: { apiKeyEncrypted: true },
+            });
+            if (orgMapping) {
+                const apiKey = decryptApiKey(orgMapping.apiKeyEncrypted, process.env.ENCRYPTION_KEY!);
+                const rolesRes = await fetch('https://api.trackpilots.com/v1/access-management', {
+                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                });
+                const rolesData = await rolesRes.json() as any;
+                const tpRoleId = rolesData.data?.find((r: any) => r.roleName === 'Employee')?.roleId ?? rolesData.data?.[0]?.roleId ?? '';
+                let teamIds: string[] = [];
+                if (req.teamId) {
+                    const teamMapping = await this.db.agentTeamMapping.findFirst({
+                        where: { teamId: req.teamId, orgId, agentProvider: 'trackpilots' },
+                    });
+                    if (teamMapping) teamIds = [teamMapping.externalTeamId];
+                }
+                const workMode = (req.workMode?.toLowerCase() ?? 'office');
+                await fetch('https://api.trackpilots.com/v1/employees/send-invite-link', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ emailId: req.email, userName: req.name, roleId: tpRoleId, teams: teamIds, workMode }),
+                });
+                console.log(`[Trackpilots] invite sent to ${req.email}`);
+            }
+        } catch (err) { console.error('[Trackpilots] inviteEmployee failed:', err); }
 
         const settings = await this.buildSettings(orgId, employee.id);
         return { ...employee, teamName: employee.team?.name, roleName: employee.role.name, settings };
@@ -130,11 +167,43 @@ export class EmployeeService {
         const e = await this.db.employee.findFirst({ where: { id: employeeId, orgId } });
         if (!e) throw notFound('Employee', employeeId);
 
-        await this.db.employee.update({
-            where: { id: employeeId },
-            data: { status: 'inactive', isCurrentlyWorking: false },
-        });
-        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.deactivated',
+        // Remove from Trackpilots
+        try {
+            const [mapping, orgMapping] = await Promise.all([
+                this.db.agentEmployeeMapping.findFirst({
+                    where: { employeeId, orgId, agentProvider: 'trackpilots' },
+                }),
+                this.db.agentOrgMapping.findFirst({
+                    where: { orgId, agentProvider: 'trackpilots' },
+                    select: { apiKeyEncrypted: true },
+                }),
+            ]);
+            if (mapping && orgMapping) {
+                const apiKey = decryptApiKey(orgMapping.apiKeyEncrypted, process.env.ENCRYPTION_KEY!);
+                await fetch('https://api.trackpilots.com/v1/employees', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: mapping.externalUserId }),
+                });
+            }
+        } catch (err) {
+            console.error('[Trackpilots] deleteEmployee failed:', err);
+        }
+
+        await this.db.$transaction([
+            this.db.clientAuth.deleteMany({ where: { employeeId } }),
+            this.db.agentEmployeeMapping.deleteMany({ where: { employeeId } }),
+            this.db.screenshotSetting.deleteMany({ where: { employeeId } }),
+            this.db.workDaySetting.deleteMany({ where: { employeeId } }),
+            this.db.idleAlertSetting.deleteMany({ where: { employeeId } }),
+            this.db.stealthMonitoringSetting.deleteMany({ where: { employeeId } }),
+            this.db.expectedWorkHoursSetting.deleteMany({ where: { employeeId } }),
+            this.db.screenshot.deleteMany({ where: { employeeId } }),
+            this.db.activityEvent.deleteMany({ where: { employeeId } }),
+            this.db.dailySummary.deleteMany({ where: { employeeId } }),
+            this.db.employee.delete({ where: { id: employeeId } }),
+        ]);
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.deleted',
             orgId, targetType: 'Employee', targetId: employeeId });
     }
 

@@ -1,8 +1,17 @@
 import type { PrismaClient } from '@prisma/client';
+import type { S3Storage } from '../infrastructure/storage/s3Storage.js';
+import type { LocalFileStorage } from '../infrastructure/storage/localFileStorage.js';
 import { paged, type PagedResult } from '../types/common.js';
 
+type Storage = S3Storage | LocalFileStorage;
+
 export class ScreenshotService {
-    constructor(private readonly db: PrismaClient) {}
+    constructor(private readonly db: PrismaClient, private readonly storage: Storage) {}
+
+    private async toUrl(key: string | null): Promise<string | null> {
+        if (!key) return null;
+        return this.storage.generateSignedUrl(key, 3600);
+    }
 
     async listScreenshots(orgId: string, opts: {
         employeeId?: string; from?: Date; to?: Date; page?: number; pageSize?: number;
@@ -31,13 +40,31 @@ export class ScreenshotService {
                 .then(rows => new Map(rows.map(r => [r.id, r.name]))),
         ]);
 
-        return paged(items.map(s => ({
+        const urls = await Promise.all(items.map(async s => ({
+            imageUrl: await this.toUrl(s.imageUrl),
+            thumbnailUrl: await this.toUrl(s.thumbnailUrl),
+        })));
+
+        return paged(items.map((s, i) => ({
             id: s.id, employeeId: s.employeeId,
             employeeName: employeeNames.get(s.employeeId) ?? 'Unknown',
-            imageUrl: s.imageUrl, thumbnailUrl: s.thumbnailUrl, isBlurred: s.isBlurred,
+            imageUrl: urls[i].imageUrl, thumbnailUrl: urls[i].thumbnailUrl, isBlurred: s.isBlurred,
             appName: s.appName, appDomain: s.appDomain, isIdle: s.isIdle,
             productivityStatus: s.productivityStatus, capturedAt: s.capturedAt,
         })), total, page, pageSize);
+    }
+
+    async getScreenshot(orgId: string, screenshotId: string) {
+        const s = await this.db.screenshot.findFirst({ where: { id: screenshotId, orgId } });
+        if (!s) throw Object.assign(new Error(`Screenshot ${screenshotId} not found.`), { statusCode: 404 });
+        return {
+            id: s.id, employeeId: s.employeeId,
+            imageUrl: await this.toUrl(s.imageUrl),
+            thumbnailUrl: await this.toUrl(s.thumbnailUrl),
+            isBlurred: s.isBlurred,
+            appName: s.appName, appDomain: s.appDomain, isIdle: s.isIdle,
+            productivityStatus: s.productivityStatus, capturedAt: s.capturedAt,
+        };
     }
 
     async toggleBlur(orgId: string, screenshotId: string, blur: boolean) {

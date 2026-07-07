@@ -9,11 +9,16 @@ export async function clientScreenshotRoutes(app: FastifyInstance, svc: Screensh
         return svc.listScreenshots(req.orgId, {
             employeeId: q['employeeId'],
             from: q['from'] ? new Date(q['from']) : undefined,
-            to: q['to'] ? new Date(q['to']) : undefined,
+            to: q['to'] ? new Date(q['to'] + 'T23:59:59.999Z') : undefined,
             page: Number(q['page'] ?? 1),
             pageSize: Number(q['pageSize'] ?? 30),
             productivityStatus: q['productivityStatus'],
         });
+    });
+
+    app.get('/api/client/screenshots/:id', { preHandler: [auth] }, async (req) => {
+        const { id } = req.params as { id: string };
+        return svc.getScreenshot(req.orgId, id);
     });
 
     app.patch('/api/client/screenshots/:id/blur', { preHandler: [auth] }, async (req, reply) => {
