@@ -71,8 +71,9 @@ export class ScreenshotEventJob {
         const app = screenshot.app ?? {};
         const time = screenshot.time ?? {};
 
-        // Skip simulation placeholders
-        const imageBuffer: string | null = screenshot.imageBuffer ?? null;
+        // Trackpilots may send imageBuffer as a non-string (object/array) in some agent versions
+        const rawImageBuffer = screenshot.imageBuffer;
+        const imageBuffer: string | null = typeof rawImageBuffer === 'string' ? rawImageBuffer : null;
         const isSimulation = !imageBuffer || imageBuffer.startsWith('[simulation');
         if (isSimulation) {
             await markLog(this.db, data.webhookLogId, 'Processed');
