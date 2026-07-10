@@ -14,7 +14,7 @@ export class TeamService {
         const teams = await this.db.team.findMany({
             where: { orgId, deletedAt: null },
             orderBy: { name: 'asc' },
-            include: { _count: { select: { employees: { where: { deletedAt: null } } } } },
+            include: { _count: { select: { employees: { where: { deletedAt: null, status: 'active' } } } } },
         });
 
         const teamIds = teams.map(t => t.id);
@@ -70,7 +70,7 @@ export class TeamService {
 
         const team = await this.db.team.findFirst({
             where: { id: teamId, orgId, deletedAt: null },
-            include: { employees: { where: { deletedAt: null }, include: { role: true } } },
+            include: { employees: { where: { deletedAt: null, status: 'active' }, include: { role: true } } },
         });
         if (!team) throw notFound('Team', teamId);
 

@@ -13,7 +13,7 @@ export class AttendanceService {
         const [employees, summaryMap] = await Promise.all([
             this.db.employee.findMany({
                 where: employeesWhere,
-                select: { id: true, name: true, team: { select: { name: true } } },
+                select: { id: true, name: true, isCurrentlyWorking: true, lastSeenAt: true, team: { select: { name: true } } },
             }),
             this.db.dailySummary.findMany({
                 where: { orgId, summaryDate: date },
@@ -27,6 +27,7 @@ export class AttendanceService {
                 name: emp.name,
                 teamName: emp.team?.name ?? null,
                 isPresent: s?.isPresent ?? false,
+                isCurrentlyActive: emp.isCurrentlyWorking && emp.lastSeenAt && (Date.now() - new Date(emp.lastSeenAt).getTime()) < 10 * 60 * 1000,
                 firstCheckin: s?.firstCheckin ?? null,
                 lastCheckout: s?.lastCheckout ?? null,
                 totalWorkSeconds: s?.totalWorkSeconds ?? 0,
@@ -75,11 +76,11 @@ export class AttendanceService {
             where: {
                 orgId,
                 eventType: 'App',
-                startTime: { gte: dayStart, lt: dayEnd },
+                receivedAt: { gte: dayStart, lt: dayEnd },
                 employeeId: { in: employees.map(e => e.id) },
             },
-            select: { employeeId: true, appName: true, productivityStatus: true, startTime: true, endTime: true, durationSeconds: true },
-            orderBy: { startTime: 'asc' },
+            select: { employeeId: true, appName: true, productivityStatus: true, startTime: true, endTime: true, durationSeconds: true, receivedAt: true },
+            orderBy: { receivedAt: 'asc' },
         });
 
         const byEmployee = new Map<string, typeof events>();
@@ -96,8 +97,8 @@ export class AttendanceService {
             segments: (byEmployee.get(e.id) ?? []).map(ev => ({
                 appName: ev.appName,
                 productivityStatus: ev.productivityStatus,
-                startTime: ev.startTime,
-                endTime: ev.endTime,
+                startTime: ev.startTime ?? ev.receivedAt,
+                endTime: ev.endTime ?? new Date(((ev.startTime ?? ev.receivedAt)).getTime() + ((ev.durationSeconds ?? 60) * 1000)),
                 durationSeconds: ev.durationSeconds,
             })),
         }));

@@ -39,7 +39,10 @@ export class ReportsService {
     async getAppUsage(orgId: string, from: Date, to: Date, employeeId?: string) {
         const where = {
             orgId,
-            startTime: { gte: from, lte: to },
+            OR: [
+                { startTime: { gte: from, lte: to } },
+                { startTime: null, receivedAt: { gte: from, lte: to } },
+            ],
             appName: { not: null },
             durationSeconds: { not: null },
             ...(employeeId ? { employeeId } : {}),
@@ -47,13 +50,15 @@ export class ReportsService {
 
         const events = await this.db.activityEvent.findMany({
             where,
-            select: { appName: true, appDomain: true, appCategory: true, productivityStatus: true, durationSeconds: true },
+            select: { appName: true, appType: true, appDomain: true, appCategory: true, appIconUrl: true, productivityStatus: true, durationSeconds: true },
         });
 
         const groups = new Map<string, { totalDuration: number; count: number; meta: typeof events[0] }>();
         for (const e of events) {
-            const key = `${e.appName}|${e.appDomain ?? ''}|${e.appCategory ?? ''}|${e.productivityStatus ?? 'Neutral'}`;
-            const g = groups.get(key) ?? { totalDuration: 0, count: 0, meta: e };
+            if (e.appCategory === 'trackpilots-category') continue;
+            const name = (e.appName ?? '').replace(/\.(Root|exe)$/i, '').trim();
+            const key = `${name}|${e.appDomain ?? ''}|${e.appCategory ?? ''}|${e.productivityStatus ?? 'Neutral'}`;
+            const g = groups.get(key) ?? { totalDuration: 0, count: 0, meta: { ...e, appName: name } };
             g.totalDuration += e.durationSeconds ?? 0;
             g.count++;
             groups.set(key, g);
@@ -62,8 +67,10 @@ export class ReportsService {
         return Array.from(groups.values())
             .map(({ totalDuration, count, meta }) => ({
                 appName: meta.appName,
+                appType: meta.appType ?? null,
                 appDomain: meta.appDomain,
                 appCategory: meta.appCategory,
+                appIconUrl: meta.appIconUrl ?? null,
                 productivityStatus: meta.productivityStatus ?? 'Neutral',
                 totalDurationSeconds: totalDuration,
                 eventCount: count,

@@ -81,8 +81,8 @@ export class AppEventJob {
         });
 
         await this.upsertDailySummary(
-            mapping.orgId, mapping.employeeId,
-            new Date(data.occurredAt), productivity, durationSeconds ?? 0,
+            mapping.orgId, mapping.employeeId, mapping.employee.teamId,
+            new Date(data.occurredAt), productivity, durationSeconds ?? 0, new Date(data.occurredAt),
         );
 
         await markLog(this.db, data.webhookLogId, 'Processed');
@@ -123,10 +123,12 @@ export class AppEventJob {
     }
 
     private async upsertDailySummary(
-        orgId: string, employeeId: string, date: Date,
-        status: string, durationSeconds: number,
+        orgId: string, employeeId: string, teamId: string | null, date: Date,
+        status: string, durationSeconds: number, eventTime: Date,
     ): Promise<void> {
-        const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+        const dayStart = new Date(Date.UTC(istDate.getUTCFullYear(), istDate.getUTCMonth(), istDate.getUTCDate()));
 
         const existing = await this.db.dailySummary.findFirst({
             where: { orgId, employeeId, summaryDate: dayStart },
@@ -141,9 +143,15 @@ export class AppEventJob {
             const newUnproductive = existing.unproductiveSeconds + unproductive;
             const newNeutral = existing.neutralSeconds + neutral;
             const total = newProductive + newUnproductive + newNeutral;
-            const score = total > 0
-                ? Math.round((newProductive / total) * 100 * 100) / 100
-                : null;
+            const score = total > 0 ? Math.round((newProductive / total) * 100 * 100) / 100 : null;
+
+            const firstCheckin = existing.firstCheckin
+                ? (eventTime < existing.firstCheckin ? eventTime : existing.firstCheckin)
+                : eventTime;
+            const lastCheckout = existing.lastCheckout
+                ? (eventTime > existing.lastCheckout ? eventTime : existing.lastCheckout)
+                : eventTime;
+            const totalWorkSeconds = Math.floor((lastCheckout.getTime() - firstCheckin.getTime()) / 1000);
 
             await this.db.dailySummary.update({
                 where: { id: existing.id },
@@ -152,6 +160,7 @@ export class AppEventJob {
                     unproductiveSeconds: newUnproductive,
                     neutralSeconds: newNeutral,
                     productivityScore: score,
+                    firstCheckin, lastCheckout, totalWorkSeconds,
                     isPresent: true,
                     updatedAt: new Date(),
                 },
@@ -163,12 +172,15 @@ export class AppEventJob {
             await this.db.dailySummary.create({
                 data: {
                     id: crypto.randomUUID(),
-                    orgId, employeeId,
+                    orgId, employeeId, teamId,
                     summaryDate: dayStart,
                     productiveSeconds: productive,
                     unproductiveSeconds: unproductive,
                     neutralSeconds: neutral,
                     productivityScore: score,
+                    firstCheckin: eventTime,
+                    lastCheckout: eventTime,
+                    totalWorkSeconds: 0,
                     isPresent: true,
                     updatedAt: new Date(),
                 },
