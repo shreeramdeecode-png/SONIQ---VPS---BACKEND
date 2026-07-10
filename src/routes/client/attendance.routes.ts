@@ -14,7 +14,7 @@ export async function clientAttendanceRoutes(app: FastifyInstance, svc: Attendan
         const { id } = req.params as { id: string };
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
-        const to = new Date((q['to'] ?? new Date().toISOString().slice(0, 10)) + 'T23:59:59.999Z');
+        const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
         return svc.getEmployeeAttendance(req.orgId, id, from, to);
     });
 

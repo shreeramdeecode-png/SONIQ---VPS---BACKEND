@@ -83,7 +83,7 @@ export class EmployeeService {
                 designation: req.designation,
                 department: req.department,
                 workModeType: req.workMode ?? 'Office',
-                status: 'invited',
+                status: 'active',
                 updatedAt: new Date(),
                 clientAuth: {
                     create: {
@@ -134,32 +134,6 @@ export class EmployeeService {
         return { ...employee, teamName: employee.team?.name, roleName: employee.role.name, settings };
     }
 
-    async resendInvite(orgId: string, employeeId: string) {
-        const e = await this.db.employee.findFirst({
-            where: { id: employeeId, orgId, status: 'invited', deletedAt: null },
-        });
-        if (!e) throw Object.assign(new Error('Employee not found or not in invited state'), { statusCode: 404 });
-
-        if (e.teamId) {
-            try {
-                const [orgMapping, empMapping, teamMapping] = await Promise.all([
-                    this.db.agentOrgMapping.findFirst({ where: { orgId, agentProvider: 'trackpilots' }, select: { apiKeyEncrypted: true } }),
-                    this.db.agentEmployeeMapping.findFirst({ where: { employeeId, orgId, agentProvider: 'trackpilots' } }),
-                    this.db.agentTeamMapping.findFirst({ where: { teamId: e.teamId, orgId, agentProvider: 'trackpilots' } }),
-                ]);
-                if (orgMapping && teamMapping) {
-                    const apiKey = decryptApiKey(orgMapping.apiKeyEncrypted, process.env.ENCRYPTION_KEY!);
-                    await fetch('https://api.trackpilots.com/v1/employees/send-invite-link', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ emailId: e.email, userName: e.name, teams: [teamMapping.externalTeamId], workMode: (e.workModeType ?? 'Office').toLowerCase() }),
-                    });
-                }
-            } catch (err) { console.error('[Trackpilots] resendInvite failed:', err); }
-        }
-        return { success: true };
-    }
-
     async updateEmployee(orgId: string, actorId: string, employeeId: string, req: {
         name?: string; designation?: string; department?: string;
         teamId?: string; roleId?: string; workMode?: string;
@@ -184,44 +158,6 @@ export class EmployeeService {
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.updated',
             orgId, targetType: 'Employee', targetId: employeeId, after: updated.name });
-
-        // Sync name change to Trackpilots
-        if (req.name) {
-            try {
-                const [mapping, orgMapping] = await Promise.all([
-                    this.db.agentEmployeeMapping.findFirst({
-                        where: { employeeId, orgId, agentProvider: 'trackpilots' },
-                    }),
-                    this.db.agentOrgMapping.findFirst({
-                        where: { orgId, agentProvider: 'trackpilots' },
-                        select: { apiKeyEncrypted: true },
-                    }),
-                ]);
-                if (mapping && orgMapping) {
-                    const apiKey = decryptApiKey(orgMapping.apiKeyEncrypted, process.env.ENCRYPTION_KEY!);
-                    const getRes = await fetch('https://api.trackpilots.com/v1/employees', {
-                        headers: { 'Authorization': `Bearer ${apiKey}` },
-                    });
-                    const getData = await getRes.json() as any;
-                    const empList = Array.isArray(getData.data) ? getData.data : [];
-                    const tpEmp = empList.find((u: any) => u.userId === mapping.externalUserId);
-                    if (tpEmp) {
-                        const roleId = tpEmp.roleId ?? tpEmp.role?.roleId ?? '';
-                        const teams = (tpEmp.teams ?? []).map((t: any) => t.teamId);
-                        const workMode = tpEmp.workMode ?? updated.workModeType?.toLowerCase() ?? 'office';
-                        const tpRes = await fetch('https://api.trackpilots.com/v1/employees', {
-                            method: 'PATCH',
-                            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ userId: mapping.externalUserId, userName: req.name, roleId, teams, workMode }),
-                        });
-                        const tpBody = await tpRes.text();
-                        console.log('[Trackpilots] updateEmployee status:', tpRes.status, tpBody);
-                    }
-                }
-            } catch (err) {
-                console.error('[Trackpilots] updateEmployee failed:', err);
-            }
-        }
 
         const settings = await this.buildSettings(orgId, employeeId);
         return { ...updated, teamName: updated.team?.name, roleName: updated.role.name, settings };

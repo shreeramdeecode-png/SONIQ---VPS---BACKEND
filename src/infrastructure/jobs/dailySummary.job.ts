@@ -46,14 +46,14 @@ export class DailySummaryJob {
             .filter(e => e.productivityStatus === 'Neutral')
             .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
 
-        const eventTimes = events.map(e => (e.startTime ?? e.receivedAt).getTime());
-        const eventEndTimes = events.map(e => {
-            const start = (e.startTime ?? e.receivedAt).getTime();
-            return (e.endTime ? e.endTime.getTime() : start + (e.durationSeconds ?? 60) * 1000);
-        });
-        const firstCheckin = eventTimes.length > 0 ? new Date(Math.min(...eventTimes)) : null;
-        const lastCheckout = eventEndTimes.length > 0 ? new Date(Math.max(...eventEndTimes)) : null;
-        const totalWork = events.reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
+        const startTimes = events.map(e => e.startTime).filter((t): t is Date => t !== null);
+        const endTimes = events.map(e => e.endTime).filter((t): t is Date => t !== null);
+        const firstCheckin = startTimes.length > 0
+            ? new Date(Math.min(...startTimes.map(t => t.getTime()))) : null;
+        const lastCheckout = endTimes.length > 0
+            ? new Date(Math.max(...endTimes.map(t => t.getTime()))) : null;
+        const totalWork = firstCheckin && lastCheckout
+            ? Math.floor((lastCheckout.getTime() - firstCheckin.getTime()) / 1000) : 0;
 
         const denominator = productive + unproductive + neutral;
         const score = denominator > 0

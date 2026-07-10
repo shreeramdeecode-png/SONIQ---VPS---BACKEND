@@ -30,11 +30,6 @@ export async function clientEmployeeRoutes(app: FastifyInstance, svc: EmployeeSe
         return svc.updateEmployee(req.orgId, req.actorId, id, req.body as any);
     });
 
-    app.post('/api/client/employees/:id/resend-invite', { preHandler: [auth, manageEmployees] }, async (req, reply) => {
-        const { id } = req.params as { id: string };
-        return svc.resendInvite(req.orgId, id);
-    });
-
     app.post('/api/client/employees/:id/deactivate', { preHandler: [auth, manageEmployees] }, async (req, reply) => {
         const { id } = req.params as { id: string };
         await svc.deactivateEmployee(req.orgId, req.actorId, id);

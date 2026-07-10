@@ -6,18 +6,13 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
 
     app.get('/api/client/dashboard/stats', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        const from = q['from'] ? new Date(q['from']) : undefined;
-        const to = q['to'] ? new Date(q['to']) : undefined;
-        if (to) to.setUTCHours(23, 59, 59, 999);
-        return svc.getTodayStats(req.orgId, from, to, q['teamId']);
+        return svc.getTodayStats(req.orgId, q['teamId']);
     });
 
     app.get('/api/client/dashboard/top-productive', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        const from = q['from'] ? new Date(q['from']) : (q['date'] ? new Date(q['date']) : new Date());
-        const to = q['to'] ? new Date(q['to']) : (q['date'] ? new Date(q['date']) : new Date());
-        to.setUTCHours(23, 59, 59, 999);
-        return svc.getTopProductive(req.orgId, from, to, Number(q['limit'] ?? 5), q['teamId']);
+        const date = q['date'] ? new Date(q['date']) : new Date();
+        return svc.getTopProductive(req.orgId, date, Number(q['limit'] ?? 5), q['teamId']);
     });
 
     app.get('/api/client/dashboard/top-unproductive', { preHandler: [auth] }, async (req) => {
@@ -30,7 +25,6 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
         const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
-        to.setUTCHours(23, 59, 59, 999); // include all events through end of the `to` day
         return svc.getTopApps(req.orgId, from, to, Number(q['limit'] ?? 10), q['teamId']);
     });
 
@@ -44,7 +38,6 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
         const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
-        to.setUTCHours(23, 59, 59, 999); // include all events through end of the `to` day
         return svc.getWorkHourChart(req.orgId, from, to, q['teamId']);
     });
 

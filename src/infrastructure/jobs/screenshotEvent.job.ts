@@ -25,6 +25,7 @@ export class ScreenshotEventJob {
             return;
         }
 
+        // Idempotency — check by external screenshot ID
         if (data.externalTrackingId) {
             const exists = await this.db.screenshot.findFirst({
                 where: { externalScreenshotId: data.externalTrackingId },
@@ -35,6 +36,7 @@ export class ScreenshotEventJob {
             }
         }
 
+        // Check if screen capture is enabled for this employee
         const [screenshotSetting, orgDefault] = await Promise.all([
             this.db.screenshotSetting.findFirst({ where: { employeeId: mapping.employeeId } }),
             this.db.orgDefaultSetting.findFirst({ where: { orgId: mapping.orgId } }),
@@ -57,31 +59,11 @@ export class ScreenshotEventJob {
         const app = screenshot.app ?? {};
         const time = screenshot.time ?? {};
 
-        const rawImageField = screenshot.imageBuffer ?? null;
-
-        const isSimulation = !rawImageField ||
-            (typeof rawImageField === 'string' && rawImageField.startsWith('[simulation'));
+        // imageBuffer can be base64 string or a URL — skip if simulation placeholder
+        const imageBuffer: string | null = screenshot.imageBuffer ?? null;
+        const isSimulation = !imageBuffer || imageBuffer.startsWith('[simulation');
         if (isSimulation) {
             await markLog(this.db, data.webhookLogId, 'Processed');
-            return;
-        }
-
-        // Trackpilots sends imageBuffer as serialized Node Buffer: { type: 'Buffer', data: [255, 216, ...] }
-        let imageUrl: string | null = null;
-        let imageRawBuf: Buffer | null = null;
-
-        if (typeof rawImageField === 'string') {
-            if (rawImageField.startsWith('http://') || rawImageField.startsWith('https://')) {
-                imageUrl = rawImageField;
-            } else {
-                imageRawBuf = Buffer.from(rawImageField, 'base64');
-            }
-        } else if (rawImageField?.type === 'Buffer' && Array.isArray(rawImageField.data)) {
-            imageRawBuf = Buffer.from(rawImageField.data as number[]);
-        } else if (Array.isArray(rawImageField)) {
-            imageRawBuf = Buffer.from(rawImageField as number[]);
-        } else {
-            await markLog(this.db, data.webhookLogId, 'Failed');
             return;
         }
 
@@ -90,7 +72,6 @@ export class ScreenshotEventJob {
         const appTypeRaw: string | null = app.type ?? null;
         const appCategory: string | null = app.category ?? null;
         const appFullUrl: string | null = app.fullUrl ?? null;
-        const appIconUrl: string | null = app.iconUrl ?? null;
         const productivityStatus: string | null = app.productivityStatus ?? null;
         const isIdle: boolean = screenshot.isIdle ?? false;
         const os: string | null = screenshot.operatingSystem ?? null;
@@ -98,10 +79,18 @@ export class ScreenshotEventJob {
         const capturedAt = time.capturedAt ? new Date(time.capturedAt) : new Date(data.occurredAt);
         const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
 
+        // Resolve imageUrl: HTTP URL → download, base64 → decode directly
+        const imageUrl = imageBuffer.startsWith('http') ? imageBuffer : null;
+        const imageBase64 = !imageBuffer.startsWith('http') ? imageBuffer : null;
+        if (!imageUrl && !imageBase64) {
+            await markLog(this.db, data.webhookLogId, 'Failed');
+            return;
+        }
+
         const screenshotId = crypto.randomUUID();
         const keyPrefix = `${mapping.orgId}/${mapping.employeeId}/${screenshotId}`;
 
-        const { fullKey, thumbKey } = await this.downloadAndUpload(imageUrl, imageRawBuf, keyPrefix, blurEnabled);
+        const { fullKey, thumbKey } = await this.downloadAndUpload(imageUrl, imageBase64, keyPrefix, blurEnabled);
 
         const dayStart = new Date(Date.UTC(
             capturedAt.getUTCFullYear(), capturedAt.getUTCMonth(), capturedAt.getUTCDate(),
@@ -117,11 +106,12 @@ export class ScreenshotEventJob {
                 imageUrl: fullKey,
                 thumbnailUrl: thumbKey,
                 isBlurred: blurEnabled,
-                appName, appType, appCategory, appDomain, appFullUrl, appIconUrl,
+                appName, appType, appCategory, appDomain, appFullUrl,
                 productivityStatus, isIdle, operatingSystem: os, workType, capturedAt,
             },
         });
 
+        // Increment daily summary screenshot count
         const summary = await this.db.dailySummary.findFirst({
             where: { orgId: mapping.orgId, employeeId: mapping.employeeId, summaryDate: dayStart },
         });
@@ -136,14 +126,14 @@ export class ScreenshotEventJob {
     }
 
     private async downloadAndUpload(
-        sourceUrl: string | null, sourceBuffer: Buffer | null, keyPrefix: string, blur: boolean,
+        sourceUrl: string | null, sourceBase64: string | null, keyPrefix: string, blur: boolean,
     ): Promise<{ fullKey: string; thumbKey: string }> {
         let buf: Buffer;
         if (sourceUrl) {
             const res = await axios.get(sourceUrl, { responseType: 'arraybuffer' });
             buf = Buffer.from(res.data as ArrayBuffer);
         } else {
-            buf = sourceBuffer!;
+            buf = Buffer.from(sourceBase64!, 'base64');
         }
 
         if (blur) {
