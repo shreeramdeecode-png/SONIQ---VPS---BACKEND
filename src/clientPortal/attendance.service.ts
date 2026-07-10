@@ -113,15 +113,21 @@ export class AttendanceService {
             employeeId: e.id,
             name: e.name,
             teamName: e.team?.name ?? null,
-            segments: (byEmployee.get(e.id) ?? []).map(ev => ({
-                appName: ev.appName,
-                appDomain: ev.appDomain,
-                appType: ev.appType,
-                productivityStatus: ev.productivityStatus,
-                startTime: ev.startTime ?? ev.receivedAt,
-                endTime: ev.endTime,
-                durationSeconds: ev.durationSeconds,
-            })),
+            segments: (byEmployee.get(e.id) ?? []).map(ev => {
+                const startTime = ev.startTime ?? ev.receivedAt;
+                // endTime is null for all Trackpilots events; derive from startTime + durationSeconds
+                const endTime = ev.endTime
+                    ?? (ev.durationSeconds ? new Date(startTime.getTime() + ev.durationSeconds * 1000) : null);
+                return {
+                    appName: ev.appName,
+                    appDomain: ev.appDomain,
+                    appType: ev.appType,
+                    productivityStatus: ev.productivityStatus,
+                    startTime,
+                    endTime,
+                    durationSeconds: ev.durationSeconds,
+                };
+            }),
         }));
     }
 

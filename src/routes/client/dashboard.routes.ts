@@ -8,6 +8,20 @@ function parseDate(s: string | undefined): Date {
     return d;
 }
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+// For date-only strings (YYYY-MM-DD from frontend IST browsers), convert to UTC equivalent
+// of IST midnight start / end so receivedAt queries cover the full local day.
+function toIstDayStart(s: string | undefined): Date {
+    const raw = parseDate(s);
+    return s?.length === 10 ? new Date(raw.getTime() - IST_OFFSET_MS) : raw;
+}
+
+function toIstDayEnd(s: string | undefined): Date {
+    const raw = parseDate(s);
+    return s?.length === 10 ? new Date(raw.getTime() - IST_OFFSET_MS + 86400000) : raw;
+}
+
 export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDashboardService) {
     const auth = app.authenticate('client');
 
@@ -28,8 +42,10 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
 
     app.get('/api/client/dashboard/top-apps', { preHandler: [auth] }, async (req, reply) => {
         const q = req.query as Record<string, string>;
-        const from = parseDate(q['from']);
-        const to = parseDate(q['to']);
+        // Date-only strings (YYYY-MM-DD) are IST local dates; shift to IST day boundaries
+        // so events throughout the IST day are included in receivedAt queries
+        const from = toIstDayStart(q['from']);
+        const to = toIstDayEnd(q['to']);
         if (from > to) return reply.status(400).send({ error: 'from must be before to' });
         return svc.getTopApps(req.orgId, from, to, Number(q['limit'] ?? 10), q['teamId']);
     });

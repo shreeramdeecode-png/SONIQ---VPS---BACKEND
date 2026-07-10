@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { ReportsService } from '../../clientPortal/reports.service.js';
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+// Date-only strings (YYYY-MM-DD) from frontend IST browsers → align to IST day UTC boundaries
+function istDayStart(s: string): Date { return new Date(new Date(s).getTime() - IST_OFFSET_MS); }
+function istDayEnd(s: string): Date { return new Date(new Date(s).getTime() - IST_OFFSET_MS + 86400000); }
+
 export async function clientReportRoutes(app: FastifyInstance, svc: ReportsService) {
     const auth = app.authenticate('client');
 
@@ -13,8 +18,10 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
 
     app.get('/api/client/reports/app-usage', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
-        const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
+        const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
+        const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
+        const from = istDayStart(fromStr);
+        const to = istDayEnd(toStr);
         return svc.getAppUsage(req.orgId, from, to, q['employeeId']);
     });
 

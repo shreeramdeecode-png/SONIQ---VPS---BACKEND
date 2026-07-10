@@ -67,42 +67,76 @@ export class ClientDashboardService {
                 .then(rows => rows.map(r => r.id))
             : undefined;
 
-        // Aggregate in DB — avoids loading all events into memory
         const timeFilter = {
             OR: [
                 { startTime: { gte: from, lte: to } },
                 { startTime: null, receivedAt: { gte: from, lte: to } },
             ],
         };
+        const empFilter = empIds ? { employeeId: { in: empIds } } : {};
 
-        const groups = await this.db.activityEvent.groupBy({
-            by: ['appName'],
-            where: {
-                orgId,
-                eventType: 'App',
-                appName: { not: null },
-                ...(empIds ? { employeeId: { in: empIds } } : {}),
-                ...timeFilter,
-            },
-            _sum: { durationSeconds: true },
-            orderBy: { _sum: { durationSeconds: 'desc' } },
-            take: limit,
-        });
+        // System states that Trackpilots emits as app events — exclude from all app charts
+        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
 
-        // One lightweight lookup per app for metadata (at most `limit` queries)
-        return Promise.all(groups.map(async g => {
-            const meta = await this.db.activityEvent.findFirst({
-                where: { orgId, appName: g.appName, eventType: 'App', ...timeFilter },
-                select: { appDomain: true, appCategory: true, productivityStatus: true },
-            });
-            return {
-                appName: g.appName,
-                appDomain: meta?.appDomain ?? null,
-                appCategory: meta?.appCategory ?? null,
-                productivityStatus: meta?.productivityStatus ?? 'Neutral',
-                totalDurationSeconds: g._sum.durationSeconds ?? 0,
-            };
-        }));
+        // Native apps grouped by appName; websites grouped by domain for per-site breakdown
+        const [appGroups, webGroups] = await Promise.all([
+            this.db.activityEvent.groupBy({
+                by: ['appName'],
+                where: {
+                    orgId, eventType: 'App' as const, appType: 'Application',
+                    appName: { not: null },
+                    NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
+                    ...empFilter, ...timeFilter,
+                },
+                _sum: { durationSeconds: true },
+                orderBy: { _sum: { durationSeconds: 'desc' } },
+                take: limit,
+            }),
+            this.db.activityEvent.groupBy({
+                by: ['appDomain'],
+                where: {
+                    orgId, eventType: 'App' as const, appType: 'Website',
+                    appDomain: { not: null },
+                    ...empFilter, ...timeFilter,
+                },
+                _sum: { durationSeconds: true },
+                orderBy: { _sum: { durationSeconds: 'desc' } },
+                take: limit,
+            }),
+        ]);
+
+        const [appResults, webResults] = await Promise.all([
+            Promise.all(appGroups.map(async g => {
+                const meta = await this.db.activityEvent.findFirst({
+                    where: { orgId, appName: g.appName, eventType: 'App', appType: 'Application', ...timeFilter },
+                    select: { appCategory: true, productivityStatus: true },
+                });
+                return {
+                    appName: g.appName,
+                    appDomain: null as string | null,
+                    appCategory: meta?.appCategory ?? null,
+                    productivityStatus: meta?.productivityStatus ?? 'Neutral',
+                    appType: 'Application',
+                    totalDurationSeconds: g._sum.durationSeconds ?? 0,
+                };
+            })),
+            Promise.all(webGroups.map(async g => {
+                const meta = await this.db.activityEvent.findFirst({
+                    where: { orgId, appDomain: g.appDomain, eventType: 'App', appType: 'Website', ...timeFilter },
+                    select: { appName: true, appCategory: true, productivityStatus: true },
+                });
+                return {
+                    appName: meta?.appName ?? g.appDomain,
+                    appDomain: g.appDomain,
+                    appCategory: meta?.appCategory ?? null,
+                    productivityStatus: meta?.productivityStatus ?? 'Neutral',
+                    appType: 'Website',
+                    totalDurationSeconds: g._sum.durationSeconds ?? 0,
+                };
+            })),
+        ]);
+
+        return [...appResults, ...webResults].sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds);
     }
 
     async getTodayActivityTable(orgId: string, date: Date, teamId?: string) {
