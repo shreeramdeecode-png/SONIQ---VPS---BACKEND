@@ -62,7 +62,8 @@ export class ActivityEventJob {
             },
         });
 
-        // Use actual activity time for lastSeenAt, not webhook delivery time
+        // Prefer actual activity timestamps; fall back to webhook delivery time only when
+        // Trackpilots sends no startDate/endDate (Activity events are typically real-time so this is accurate).
         const activityTime = endTime ?? startTime ?? new Date(data.occurredAt);
 
         await this.db.employee.update({

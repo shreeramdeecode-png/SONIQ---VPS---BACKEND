@@ -76,10 +76,11 @@ export class DailySummaryJob {
             let end: number;
             if (e.endTime) {
                 end = e.endTime.getTime();
-            } else if (e.startTime && e.durationSeconds) {
-                end = e.startTime.getTime() + e.durationSeconds * 1000;
+            } else if (e.durationSeconds) {
+                // Use startTime if Trackpilots sent it, otherwise anchor to receivedAt
+                end = (e.startTime ?? e.receivedAt).getTime() + e.durationSeconds * 1000;
             } else {
-                continue; // no reliable end time — skip from segment calculation
+                continue; // no duration or end time at all — skip
             }
             if (end > start) rawSegments.push({ start, end });
         }

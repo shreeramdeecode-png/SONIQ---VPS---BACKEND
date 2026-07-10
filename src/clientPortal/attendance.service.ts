@@ -1,10 +1,18 @@
 import type { PrismaClient } from '@prisma/client';
 import { toCsv } from '../utils/csvExport.js';
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function toIstDay(d: Date): Date {
+    const ist = new Date(d.getTime() + IST_OFFSET_MS);
+    return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
+}
+
 export class AttendanceService {
     constructor(private readonly db: PrismaClient) {}
 
     async getDailyAttendance(orgId: string, date: Date, teamId?: string) {
+        const summaryDate = toIstDay(date);
         const employeesWhere = {
             orgId, deletedAt: null, status: 'active',
             ...(teamId ? { teamId } : {}),
@@ -16,7 +24,7 @@ export class AttendanceService {
                 select: { id: true, name: true, team: { select: { name: true } } },
             }),
             this.db.dailySummary.findMany({
-                where: { orgId, summaryDate: date },
+                where: { orgId, summaryDate },
             }).then(rows => new Map(rows.map(r => [r.employeeId, r]))),
         ]);
 
@@ -135,6 +143,3 @@ export class AttendanceService {
     }
 }
 
-function toUtcDay(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}

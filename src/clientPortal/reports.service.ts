@@ -39,10 +39,14 @@ export class ReportsService {
     async getAppUsage(orgId: string, from: Date, to: Date, employeeId?: string) {
         const where = {
             orgId,
-            startTime: { gte: from, lte: to },
+            eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
             ...(employeeId ? { employeeId } : {}),
+            OR: [
+                { startTime: { gte: from, lte: to } },
+                { startTime: null, receivedAt: { gte: from, lte: to } },
+            ],
         };
 
         const events = await this.db.activityEvent.findMany({

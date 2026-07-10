@@ -68,8 +68,10 @@ export class AppEventJob {
             },
         });
 
-        // Use actual activity time for lastSeenAt, not webhook delivery time
+        // Prefer actual activity timestamps; fall back to webhook delivery time only when
+        // Trackpilots sends no startDate/endDate (common for older agent versions).
         const activityTime = endTime ?? startTime ?? new Date(data.occurredAt);
+        const bucketTime = startTime ?? new Date(data.occurredAt);
 
         await this.db.employee.update({
             where: { id: mapping.employeeId },
@@ -80,10 +82,9 @@ export class AppEventJob {
             },
         });
 
-        // Use startTime for day bucketing so delayed webhooks land in the correct IST day
         await this.upsertDailySummary(
             mapping.orgId, mapping.employeeId, mapping.employee.teamId,
-            startTime ?? new Date(data.occurredAt), productivity, durationSeconds ?? 0,
+            bucketTime, productivity, durationSeconds ?? 0,
         );
 
         await markLog(this.db, data.webhookLogId, 'Processed');

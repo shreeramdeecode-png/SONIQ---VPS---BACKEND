@@ -68,14 +68,21 @@ export class ClientDashboardService {
             : undefined;
 
         // Aggregate in DB — avoids loading all events into memory
+        const timeFilter = {
+            OR: [
+                { startTime: { gte: from, lte: to } },
+                { startTime: null, receivedAt: { gte: from, lte: to } },
+            ],
+        };
+
         const groups = await this.db.activityEvent.groupBy({
             by: ['appName'],
             where: {
                 orgId,
                 eventType: 'App',
-                startTime: { gte: from, lte: to },
                 appName: { not: null },
                 ...(empIds ? { employeeId: { in: empIds } } : {}),
+                ...timeFilter,
             },
             _sum: { durationSeconds: true },
             orderBy: { _sum: { durationSeconds: 'desc' } },
@@ -85,7 +92,7 @@ export class ClientDashboardService {
         // One lightweight lookup per app for metadata (at most `limit` queries)
         return Promise.all(groups.map(async g => {
             const meta = await this.db.activityEvent.findFirst({
-                where: { orgId, appName: g.appName, eventType: 'App', startTime: { gte: from, lte: to } },
+                where: { orgId, appName: g.appName, eventType: 'App', ...timeFilter },
                 select: { appDomain: true, appCategory: true, productivityStatus: true },
             });
             return {
