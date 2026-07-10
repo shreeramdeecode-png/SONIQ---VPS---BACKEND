@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { ScreenshotService } from '../../clientPortal/screenshot.service.js';
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+function istDayStart(s: string): Date { return new Date(new Date(s).getTime() - IST_OFFSET_MS); }
+function istDayEnd(s: string): Date { return new Date(new Date(s).getTime() - IST_OFFSET_MS + 86400000); }
+
 export async function clientScreenshotRoutes(app: FastifyInstance, svc: ScreenshotService) {
     const auth = app.authenticate('client');
 
@@ -8,8 +12,8 @@ export async function clientScreenshotRoutes(app: FastifyInstance, svc: Screensh
         const q = req.query as Record<string, string>;
         return svc.listScreenshots(req.orgId, {
             employeeId: q['employeeId'],
-            from: q['from'] ? new Date(q['from']) : undefined,
-            to: q['to'] ? new Date(q['to'] + 'T23:59:59.999Z') : undefined,
+            from: q['from'] ? istDayStart(q['from']) : undefined,
+            to: q['to'] ? istDayEnd(q['to']) : undefined,
             page: Number(q['page'] ?? 1),
             pageSize: Number(q['pageSize'] ?? 30),
             productivityStatus: q['productivityStatus'],
