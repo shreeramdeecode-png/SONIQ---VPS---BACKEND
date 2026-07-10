@@ -70,8 +70,14 @@ export class DailySummaryJob {
         // Trackpilots is restarted hours after the last real event.
         const GAP_THRESHOLD_MS = 15 * 60 * 1000; // gaps < 15 min are continuous work
 
+        // Trackpilots emits Locked/Idle as App events with sometimes huge durationSeconds
+        // (cumulative totals). Exclude them — they are not active work time.
+        const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
+
         const rawSegments: { start: number; end: number }[] = [];
         for (const e of events) {
+            if (e.eventType === 'App' && e.appName && SYSTEM_APP_BLOCKLIST.has(e.appName)) continue;
+
             const start = (e.startTime ?? e.receivedAt).getTime();
             let end: number;
             if (e.endTime) {
@@ -82,6 +88,8 @@ export class DailySummaryJob {
             } else {
                 continue; // no duration or end time at all — skip
             }
+            // Cap to day boundary — prevents cross-day pollution from aggregate duration values
+            end = Math.min(end, utcWindowEnd.getTime());
             if (end > start) rawSegments.push({ start, end });
         }
 
