@@ -196,6 +196,48 @@ export class TrackpilotsService {
         return status < 300;
     }
 
+    // ── Settings (GET) ────────────────────────────────────────────────────────
+
+    async fetchEmployeeSettings(orgId: string, externalUserId: string): Promise<{
+        workDays?: string[];
+        workHours?: AgentWorkHourSettings;
+        screenshot?: AgentScreenshotSettings;
+        idleAlert?: AgentIdleAlertSettings;
+        stealth?: AgentStealthSettings;
+    } | null> {
+        const apiKey = await this.getApiKey(orgId);
+        const { data } = await this.http.get('v1/settings/employee', {
+            params: { userId: externalUserId },
+            headers: this.auth(apiKey),
+        });
+        const d = data?.data ?? data;
+        if (!d) return null;
+        return {
+            workDays: d.workDaySettings?.workDays,
+            workHours: d.workHourSettings,
+            screenshot: d.screenshotSettings,
+            idleAlert: d.idleAlertSettings,
+            stealth: d.stealthMonitoringSettings,
+        };
+    }
+
+    async fetchDefaultSettings(orgId: string): Promise<AgentDefaultSettings | null> {
+        const apiKey = await this.getApiKey(orgId);
+        const { data } = await this.http.get('v1/settings/default-setting', {
+            headers: this.auth(apiKey),
+        });
+        const d = data?.data ?? data;
+        if (!d) return null;
+        return {
+            workDays: d.workDaySettings?.workDays,
+            workHours: d.workHourSettings,
+            screenshot: d.screenshotSettings,
+            idleAlert: d.idleAlertSettings,
+            stealth: d.stealthMonitoringSettings,
+            timezone: d.timezoneSettings?.timezone,
+        };
+    }
+
     // ── Roles ─────────────────────────────────────────────────────────────────
 
     async fetchAccessRoles(orgId: string): Promise<AgentRole[]> {

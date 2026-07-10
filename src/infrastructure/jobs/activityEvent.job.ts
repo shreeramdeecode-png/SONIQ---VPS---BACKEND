@@ -62,11 +62,14 @@ export class ActivityEventJob {
             },
         });
 
+        // Use actual activity time for lastSeenAt, not webhook delivery time
+        const activityTime = endTime ?? startTime ?? new Date(data.occurredAt);
+
         await this.db.employee.update({
             where: { id: mapping.employeeId },
             data: {
                 isCurrentlyWorking: true,
-                lastSeenAt: new Date(data.occurredAt),
+                lastSeenAt: activityTime,
                 ...(os ? { operatingSystem: os } : {}),
                 ...(agentVersion ? { agentVersion } : {}),
                 updatedAt: new Date(),

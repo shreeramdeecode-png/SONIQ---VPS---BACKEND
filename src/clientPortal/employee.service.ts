@@ -1,18 +1,20 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
 import type { PasswordService } from '../auth/password.service.js';
+import type { TrackpilotsService } from '../infrastructure/agents/trackpilots.service.js';
 import { paged, type PagedResult } from '../types/common.js';
-import { randomUUID, createDecipheriv } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
-function decryptApiKey(ciphertext: string, keyBase64: string): string {
-    const key = Buffer.from(keyBase64, 'base64');
-    const buf = Buffer.from(ciphertext, 'base64');
-    const nonce = buf.subarray(0, 12);
-    const tag = buf.subarray(buf.length - 16);
-    const ct = buf.subarray(12, buf.length - 16);
-    const decipher = createDecipheriv('aes-256-gcm', key, nonce);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+// Helpers for Postgres TIME fields (stored as wall-clock hours/minutes, read back as Date with UTC h/m)
+function parseTimeString(s: string): Date {
+    const [h = 0, m = 0] = s.split(':').map(Number);
+    const d = new Date(0);
+    d.setUTCHours(h, m, 0, 0);
+    return d;
+}
+
+function formatTime(d: Date): string {
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 export class EmployeeService {
@@ -20,6 +22,7 @@ export class EmployeeService {
         private readonly db: PrismaClient,
         private readonly audit: AuditService,
         private readonly passwords: PasswordService,
+        private readonly trackpilots: TrackpilotsService,
     ) {}
 
     async listEmployees(orgId: string, opts: {
@@ -101,34 +104,19 @@ export class EmployeeService {
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.invited',
             orgId, targetType: 'Employee', targetId: employee.id, after: employee.email });
 
-        // Send Trackpilots invite
+        // Best-effort: send invite via Trackpilots
         try {
-            const orgMapping = await this.db.agentOrgMapping.findFirst({
-                where: { orgId, agentProvider: 'trackpilots' }, select: { apiKeyEncrypted: true },
-            });
-            if (orgMapping) {
-                const apiKey = decryptApiKey(orgMapping.apiKeyEncrypted, process.env.ENCRYPTION_KEY!);
-                const rolesRes = await fetch('https://api.trackpilots.com/v1/access-management', {
-                    headers: { 'Authorization': `Bearer ${apiKey}` },
+            const roles = await this.trackpilots.fetchAccessRoles(orgId);
+            const tpRoleId = roles.find(r => r.name.toLowerCase() === 'employee')?.id ?? roles[0]?.id ?? '';
+            const teamIds: string[] = [];
+            if (req.teamId) {
+                const tm = await this.db.agentTeamMapping.findFirst({
+                    where: { teamId: req.teamId, orgId, agentProvider: 'trackpilots' },
                 });
-                const rolesData = await rolesRes.json() as any;
-                const tpRoleId = rolesData.data?.find((r: any) => r.roleName === 'Employee')?.roleId ?? rolesData.data?.[0]?.roleId ?? '';
-                let teamIds: string[] = [];
-                if (req.teamId) {
-                    const teamMapping = await this.db.agentTeamMapping.findFirst({
-                        where: { teamId: req.teamId, orgId, agentProvider: 'trackpilots' },
-                    });
-                    if (teamMapping) teamIds = [teamMapping.externalTeamId];
-                }
-                const workMode = (req.workMode?.toLowerCase() ?? 'office');
-                await fetch('https://api.trackpilots.com/v1/employees/send-invite-link', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ emailId: req.email, userName: req.name, roleId: tpRoleId, teams: teamIds, workMode }),
-                });
-                console.log(`[Trackpilots] invite sent to ${req.email}`);
+                if (tm) teamIds.push(tm.externalTeamId);
             }
-        } catch (err) { console.error('[Trackpilots] inviteEmployee failed:', err); }
+            await this.trackpilots.inviteEmployee(orgId, req.email.toLowerCase(), req.name, tpRoleId, teamIds);
+        } catch { /* Trackpilots invite is non-fatal */ }
 
         const settings = await this.buildSettings(orgId, employee.id);
         return { ...employee, teamName: employee.team?.name, roleName: employee.role.name, settings };
@@ -159,6 +147,22 @@ export class EmployeeService {
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.updated',
             orgId, targetType: 'Employee', targetId: employeeId, after: updated.name });
 
+        // Best-effort: sync profile changes to Trackpilots
+        await this.syncToTrackpilots(orgId, employeeId, async (extId) => {
+            const teamIds: string[] = [];
+            if (updated.teamId) {
+                const tm = await this.db.agentTeamMapping.findFirst({
+                    where: { teamId: updated.teamId, orgId, agentProvider: 'trackpilots' },
+                });
+                if (tm) teamIds.push(tm.externalTeamId);
+            }
+            await this.trackpilots.updateEmployee(orgId, extId, {
+                ...(req.name ? { name: req.name } : {}),
+                ...(req.workMode ? { workMode: req.workMode } : {}),
+                ...(req.teamId !== undefined ? { teamIds } : {}),
+            });
+        });
+
         const settings = await this.buildSettings(orgId, employeeId);
         return { ...updated, teamName: updated.team?.name, roleName: updated.role.name, settings };
     }
@@ -167,43 +171,25 @@ export class EmployeeService {
         const e = await this.db.employee.findFirst({ where: { id: employeeId, orgId } });
         if (!e) throw notFound('Employee', employeeId);
 
-        // Remove from Trackpilots
-        try {
-            const [mapping, orgMapping] = await Promise.all([
-                this.db.agentEmployeeMapping.findFirst({
-                    where: { employeeId, orgId, agentProvider: 'trackpilots' },
-                }),
-                this.db.agentOrgMapping.findFirst({
-                    where: { orgId, agentProvider: 'trackpilots' },
-                    select: { apiKeyEncrypted: true },
-                }),
-            ]);
-            if (mapping && orgMapping) {
-                const apiKey = decryptApiKey(orgMapping.apiKeyEncrypted, process.env.ENCRYPTION_KEY!);
-                await fetch('https://api.trackpilots.com/v1/employees', {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId: mapping.externalUserId }),
-                });
-            }
-        } catch (err) {
-            console.error('[Trackpilots] deleteEmployee failed:', err);
+        // Best-effort: remove from Trackpilots
+        const agentMapping = await this.db.agentEmployeeMapping.findFirst({
+            where: { employeeId, orgId, agentProvider: 'trackpilots' },
+        });
+        if (agentMapping) {
+            await this.trackpilots.deleteEmployee(orgId, agentMapping.externalUserId).catch(() => {});
         }
 
+        // Soft-delete: remove login access + agent routing, keep historical data
         await this.db.$transaction([
             this.db.clientAuth.deleteMany({ where: { employeeId } }),
             this.db.agentEmployeeMapping.deleteMany({ where: { employeeId } }),
-            this.db.screenshotSetting.deleteMany({ where: { employeeId } }),
-            this.db.workDaySetting.deleteMany({ where: { employeeId } }),
-            this.db.idleAlertSetting.deleteMany({ where: { employeeId } }),
-            this.db.stealthMonitoringSetting.deleteMany({ where: { employeeId } }),
-            this.db.expectedWorkHoursSetting.deleteMany({ where: { employeeId } }),
-            this.db.screenshot.deleteMany({ where: { employeeId } }),
-            this.db.activityEvent.deleteMany({ where: { employeeId } }),
-            this.db.dailySummary.deleteMany({ where: { employeeId } }),
-            this.db.employee.delete({ where: { id: employeeId } }),
+            this.db.employee.update({
+                where: { id: employeeId },
+                data: { status: 'inactive', isDeleted: true, deletedAt: new Date(), updatedAt: new Date() },
+            }),
         ]);
-        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.deleted',
+
+        await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.deactivated',
             orgId, targetType: 'Employee', targetId: employeeId });
     }
 
@@ -220,9 +206,12 @@ export class EmployeeService {
             this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
         ]);
         return {
-            monday: wd?.monday ?? true, tuesday: wd?.tuesday ?? true,
-            wednesday: wd?.wednesday ?? true, thursday: wd?.thursday ?? true,
-            friday: wd?.friday ?? true, saturday: wd?.saturday ?? false,
+            monday: wd?.monday ?? true,
+            tuesday: wd?.tuesday ?? true,
+            wednesday: wd?.wednesday ?? true,
+            thursday: wd?.thursday ?? true,
+            friday: wd?.friday ?? true,
+            saturday: wd?.saturday ?? false,
             sunday: wd?.sunday ?? false,
         };
     }
@@ -235,7 +224,16 @@ export class EmployeeService {
         await this.upsert('workDaySetting', orgId, employeeId, req);
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.work_days_updated',
             orgId, targetType: 'Employee', targetId: employeeId });
-        return this.getWorkDaySettings(orgId, employeeId);
+
+        const saved = await this.getWorkDaySettings(orgId, employeeId);
+        await this.syncToTrackpilots(orgId, employeeId, extId =>
+            this.trackpilots.updateWorkDaySettings(orgId, extId, {
+                workDays: (Object.entries(saved) as [string, boolean][])
+                    .filter(([, v]) => v)
+                    .map(([k]) => k),
+            }),
+        );
+        return saved;
     }
 
     async getWorkHourSettings(orgId: string, employeeId: string) {
@@ -244,10 +242,11 @@ export class EmployeeService {
             this.db.expectedWorkHoursSetting.findFirst({ where: { employeeId } }),
             this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
         ]);
+        const rawInTime = wh?.expectedInTime ?? od?.defaultExpectedInTime;
         return {
             expectedWorkHoursPerDay: Number(wh?.expectedWorkHoursPerDay ?? od?.defaultWorkHoursPerDay ?? 8),
             expectedProductiveHoursPerDay: Number(wh?.expectedProductiveHoursPerDay ?? od?.defaultProductiveHoursPerDay ?? 6),
-            expectedInTime: wh?.expectedInTime ?? od?.defaultExpectedInTime ?? '08:00',
+            expectedInTime: rawInTime ? formatTime(rawInTime) : '08:00',
         };
     }
 
@@ -255,10 +254,24 @@ export class EmployeeService {
         expectedWorkHoursPerDay?: number; expectedProductiveHoursPerDay?: number; expectedInTime?: string;
     }) {
         await this.assertEmployee(orgId, employeeId);
-        await this.upsert('expectedWorkHoursSetting', orgId, employeeId, req);
+        // Parse expectedInTime string -> Date for the @db.Time Prisma field
+        const data: Record<string, unknown> = {};
+        if (req.expectedWorkHoursPerDay != null) data['expectedWorkHoursPerDay'] = req.expectedWorkHoursPerDay;
+        if (req.expectedProductiveHoursPerDay != null) data['expectedProductiveHoursPerDay'] = req.expectedProductiveHoursPerDay;
+        if (req.expectedInTime) data['expectedInTime'] = parseTimeString(req.expectedInTime);
+        await this.upsert('expectedWorkHoursSetting', orgId, employeeId, data);
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.work_hours_updated',
             orgId, targetType: 'Employee', targetId: employeeId });
-        return this.getWorkHourSettings(orgId, employeeId);
+
+        const saved = await this.getWorkHourSettings(orgId, employeeId);
+        await this.syncToTrackpilots(orgId, employeeId, extId =>
+            this.trackpilots.updateExpectedWorkHours(orgId, extId, {
+                expectedWorkMinutesPerDay: Math.round(saved.expectedWorkHoursPerDay * 60),
+                expectedProductiveWorkMinutesPerDay: Math.round(saved.expectedProductiveHoursPerDay * 60),
+                expectedInTime: saved.expectedInTime,
+            }),
+        );
+        return saved;
     }
 
     async getScreenshotSettings(orgId: string, employeeId: string) {
@@ -281,7 +294,16 @@ export class EmployeeService {
         await this.upsert('screenshotSetting', orgId, employeeId, req);
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.screenshot_settings_updated',
             orgId, targetType: 'Employee', targetId: employeeId });
-        return this.getScreenshotSettings(orgId, employeeId);
+
+        const saved = await this.getScreenshotSettings(orgId, employeeId);
+        await this.syncToTrackpilots(orgId, employeeId, extId =>
+            this.trackpilots.updateScreenshotSettings(orgId, extId, {
+                enableScreenCapture: saved.screenCaptureEnabled,
+                enableBlurScreenCapture: saved.blurEnabled,
+                screenCaptureIntervalMinutes: saved.captureIntervalMinutes,
+            }),
+        );
+        return saved;
     }
 
     async getIdleAlertSettings(orgId: string, employeeId: string) {
@@ -303,7 +325,15 @@ export class EmployeeService {
         await this.upsert('idleAlertSetting', orgId, employeeId, req);
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.idle_alert_updated',
             orgId, targetType: 'Employee', targetId: employeeId });
-        return this.getIdleAlertSettings(orgId, employeeId);
+
+        const saved = await this.getIdleAlertSettings(orgId, employeeId);
+        await this.syncToTrackpilots(orgId, employeeId, extId =>
+            this.trackpilots.updateIdleAlertSettings(orgId, extId, {
+                enableIdleTimeAlert: saved.idleAlertEnabled,
+                minimumIdleTimeMinutes: saved.minIdleTimeMinutes,
+            }),
+        );
+        return saved;
     }
 
     async getStealthSettings(orgId: string, employeeId: string) {
@@ -338,7 +368,14 @@ export class EmployeeService {
         await this.upsert('stealthMonitoringSetting', orgId, employeeId, data);
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.stealth_updated',
             orgId, targetType: 'Employee', targetId: employeeId });
-        return this.getStealthSettings(orgId, employeeId);
+
+        const saved = await this.getStealthSettings(orgId, employeeId);
+        await this.syncToTrackpilots(orgId, employeeId, extId =>
+            this.trackpilots.updateStealthSettings(orgId, extId, {
+                enableStealthMonitoring: saved.stealthEnabled,
+            }),
+        );
+        return saved;
     }
 
     private async assertEmployee(orgId: string, employeeId: string) {
@@ -353,7 +390,10 @@ export class EmployeeService {
         const { workHours, workDays, screenshot, idleAlert, stealth } = splitSettingsReq(req);
 
         await Promise.all([
-            workHours && this.upsert('expectedWorkHoursSetting', orgId, employeeId, workHours),
+            workHours && this.upsert('expectedWorkHoursSetting', orgId, employeeId, {
+                ...workHours,
+                ...(workHours['expectedInTime'] ? { expectedInTime: parseTimeString(workHours['expectedInTime'] as string) } : {}),
+            }),
             workDays && this.upsert('workDaySetting', orgId, employeeId, workDays),
             screenshot && this.upsert('screenshotSetting', orgId, employeeId, screenshot),
             idleAlert && this.upsert('idleAlertSetting', orgId, employeeId, idleAlert),
@@ -365,6 +405,18 @@ export class EmployeeService {
         return this.buildSettings(orgId, employeeId);
     }
 
+    // Looks up the agent mapping and runs fn against the external user ID; errors are swallowed
+    private async syncToTrackpilots(
+        orgId: string, employeeId: string,
+        fn: (externalUserId: string) => Promise<unknown>,
+    ): Promise<void> {
+        const mapping = await this.db.agentEmployeeMapping.findFirst({
+            where: { employeeId, orgId, agentProvider: 'trackpilots' },
+            select: { externalUserId: true },
+        });
+        if (mapping) await fn(mapping.externalUserId).catch(() => {});
+    }
+
     private async buildSettings(orgId: string, employeeId: string) {
         const [wh, wd, ss, ia, st, od] = await Promise.all([
             this.db.expectedWorkHoursSetting.findFirst({ where: { employeeId } }),
@@ -374,10 +426,11 @@ export class EmployeeService {
             this.db.stealthMonitoringSetting.findFirst({ where: { employeeId } }),
             this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
         ]);
+        const rawInTime = wh?.expectedInTime ?? od?.defaultExpectedInTime;
         return {
             expectedWorkHoursPerDay: Number(wh?.expectedWorkHoursPerDay ?? od?.defaultWorkHoursPerDay ?? 8),
             expectedProductiveHoursPerDay: Number(wh?.expectedProductiveHoursPerDay ?? od?.defaultProductiveHoursPerDay ?? 6),
-            expectedInTime: wh?.expectedInTime ?? od?.defaultExpectedInTime ?? '08:00',
+            expectedInTime: rawInTime ? formatTime(rawInTime) : '08:00',
             monday: wd?.monday ?? true, tuesday: wd?.tuesday ?? true, wednesday: wd?.wednesday ?? true,
             thursday: wd?.thursday ?? true, friday: wd?.friday ?? true,
             saturday: wd?.saturday ?? false, sunday: wd?.sunday ?? false,

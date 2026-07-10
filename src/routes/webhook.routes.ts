@@ -4,6 +4,22 @@ import type PgBoss from 'pg-boss';
 import type { PrismaClient } from '@prisma/client';
 import type { EncryptionService } from '../infrastructure/encryption.service.js';
 
+// Simple in-memory rate limiter: 120 req/min per IP (resets every window)
+const rateMap = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const entry = rateMap.get(ip) ?? { count: 0, resetAt: now + 60_000 };
+    if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 60_000; }
+    entry.count++;
+    rateMap.set(ip, entry);
+    return entry.count <= 120;
+}
+// Prevent the map from growing unboundedly (prune stale entries every ~5 minutes)
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, e] of rateMap) { if (now > e.resetAt) rateMap.delete(ip); }
+}, 5 * 60_000).unref();
+
 interface WebhookPayload {
     event: string;
     timestamp?: number;
@@ -51,6 +67,11 @@ export async function webhookRoutes(
     encryption: EncryptionService,
 ) {
     app.post('/webhooks/trackpilots', async (req, reply) => {
+        const clientIp = req.ip ?? req.headers['x-forwarded-for']?.toString() ?? 'unknown';
+        if (!checkRateLimit(clientIp)) {
+            return reply.status(429).send({ error: 'Too many requests' });
+        }
+
         const rawBody: Buffer = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
         const signature = (req.headers['x-webhook-signature'] as string) ?? '';
         const timestamp = (req.headers['x-webhook-timestamp'] as string) ?? '';
@@ -72,7 +93,7 @@ export async function webhookRoutes(
         const ts = parseInt(timestamp, 10);
         const tsSeconds = ts > 1e12 ? ts / 1000 : ts;
         const ageDiff = Math.abs(Date.now() / 1000 - tsSeconds);
-        if (isNaN(ts) || ageDiff > 86400) {
+        if (isNaN(ts) || ageDiff > 300) {
             app.log.warn({ timestamp, ts, tsSeconds, ageDiff }, 'Webhook rejected: replay guard');
             return reply.status(401).send({ error: 'Unauthorized' });
         }
@@ -149,13 +170,19 @@ export async function webhookRoutes(
 
         switch (payload.event) {
             case 'desktop.activity_tracking.captured':
-                await boss.send('activity-tracking', jobData);
+                await boss.send('activity-tracking', jobData, { retryLimit: 2, retryDelay: 30 });
                 break;
             case 'desktop.app_tracking.captured':
-                await boss.send('app-tracking', jobData);
+                await boss.send('app-tracking', jobData, { retryLimit: 2, retryDelay: 30 });
                 break;
             case 'desktop.screenshot_tracking.captured':
-                await boss.send('screenshot-processing', jobData);
+                // More retries for screenshots — image download can be transiently slow
+                await boss.send('screenshot-processing', jobData, {
+                    retryLimit: 3,
+                    retryDelay: 60,
+                    retryBackoff: true,
+                    expireInSeconds: 300,
+                });
                 break;
             default:
                 app.log.warn(`Unknown webhook event type: ${payload.event}`);

@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
+import type { TrackpilotsService } from '../infrastructure/agents/trackpilots.service.js';
 
 export class TeamService {
     constructor(
         private readonly db: PrismaClient,
         private readonly audit: AuditService,
+        private readonly trackpilots?: TrackpilotsService,
     ) {}
 
     async listTeams(orgId: string) {
@@ -148,6 +150,17 @@ export class TeamService {
         const team = await this.db.team.create({ data: { id: randomUUID(), orgId, name, updatedAt: new Date() } });
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'team.created',
             orgId, targetType: 'Team', targetId: team.id, after: name });
+
+        // Best-effort: create team in Trackpilots and store mapping
+        if (this.trackpilots) {
+            try {
+                const tpTeam = await this.trackpilots.createTeam(orgId, name);
+                await this.db.agentTeamMapping.create({
+                    data: { id: randomUUID(), teamId: team.id, orgId, agentProvider: 'trackpilots', externalTeamId: tpTeam.id },
+                });
+            } catch { /* non-fatal */ }
+        }
+
         return { id: team.id, name: team.name, employeeCount: 0, activeNow: 0, offline: 0, presentToday: 0, avgProductivityScore: null, createdAt: team.createdAt };
     }
 
@@ -160,6 +173,16 @@ export class TeamService {
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'team.updated',
             orgId, targetType: 'Team', targetId: teamId, before, after: name });
 
+        // Best-effort: rename team in Trackpilots
+        if (this.trackpilots) {
+            const mapping = await this.db.agentTeamMapping.findFirst({
+                where: { teamId, orgId, agentProvider: 'trackpilots' },
+            });
+            if (mapping) {
+                this.trackpilots.updateTeam(orgId, mapping.externalTeamId, name).catch(() => {});
+            }
+        }
+
         const count = await this.db.employee.count({ where: { teamId, deletedAt: null } });
         return { id: teamId, name, employeeCount: count, createdAt: team.createdAt };
     }
@@ -168,6 +191,16 @@ export class TeamService {
         const team = await this.db.team.findFirst({ where: { id: teamId, orgId, deletedAt: null } });
         if (!team) throw notFound('Team', teamId);
 
+        // Best-effort: delete team in Trackpilots
+        if (this.trackpilots) {
+            const mapping = await this.db.agentTeamMapping.findFirst({
+                where: { teamId, orgId, agentProvider: 'trackpilots' },
+            });
+            if (mapping) {
+                this.trackpilots.deleteTeam(orgId, mapping.externalTeamId).catch(() => {});
+            }
+        }
+
         await this.db.team.update({ where: { id: teamId }, data: { deletedAt: new Date() } });
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'team.deleted',
             orgId, targetType: 'Team', targetId: teamId, before: team.name });
@@ -175,7 +208,9 @@ export class TeamService {
 }
 
 function toDateOnly(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const ist = new Date(d.getTime() + IST_OFFSET_MS);
+    return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
 }
 
 function notFound(type: string, id: string) {

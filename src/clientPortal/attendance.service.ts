@@ -60,11 +60,20 @@ export class AttendanceService {
         }));
     }
 
-    async getAttendanceTimeline(orgId: string, date: Date, teamId?: string) {
-        const dayStart = toUtcDay(date);
+    async getAttendanceTimeline(orgId: string, date: Date, teamId?: string, employeeId?: string) {
+        // IST-aligned day boundaries (UTC+5:30): events from IST midnight to IST midnight
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+        const dayStart = new Date(
+            Date.UTC(istDate.getUTCFullYear(), istDate.getUTCMonth(), istDate.getUTCDate()) - IST_OFFSET_MS,
+        );
         const dayEnd = new Date(dayStart.getTime() + 86400000);
 
-        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+        const empWhere = {
+            orgId, deletedAt: null, status: 'active',
+            ...(teamId ? { teamId } : {}),
+            ...(employeeId ? { id: employeeId } : {}),
+        };
         const employees = await this.db.employee.findMany({
             where: empWhere,
             select: { id: true, name: true, team: { select: { name: true } } },
@@ -75,10 +84,13 @@ export class AttendanceService {
             where: {
                 orgId,
                 eventType: 'App',
-                startTime: { gte: dayStart, lt: dayEnd },
                 employeeId: { in: employees.map(e => e.id) },
+                OR: [
+                    { startTime: { gte: dayStart, lt: dayEnd } },
+                    { startTime: null, receivedAt: { gte: dayStart, lt: dayEnd } },
+                ],
             },
-            select: { employeeId: true, appName: true, productivityStatus: true, startTime: true, endTime: true, durationSeconds: true },
+            select: { employeeId: true, appName: true, appDomain: true, appType: true, productivityStatus: true, startTime: true, endTime: true, durationSeconds: true, receivedAt: true },
             orderBy: { startTime: 'asc' },
         });
 
@@ -95,8 +107,10 @@ export class AttendanceService {
             teamName: e.team?.name ?? null,
             segments: (byEmployee.get(e.id) ?? []).map(ev => ({
                 appName: ev.appName,
+                appDomain: ev.appDomain,
+                appType: ev.appType,
                 productivityStatus: ev.productivityStatus,
-                startTime: ev.startTime,
+                startTime: ev.startTime ?? ev.receivedAt,
                 endTime: ev.endTime,
                 durationSeconds: ev.durationSeconds,
             })),

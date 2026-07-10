@@ -1,16 +1,31 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuditService } from '../infrastructure/audit.service.js';
+import type { TrackpilotsService } from '../infrastructure/agents/trackpilots.service.js';
+
+function formatTimeField(val: unknown): string {
+    if (!val) return '08:00';
+    if (val instanceof Date) {
+        return `${String(val.getUTCHours()).padStart(2, '0')}:${String(val.getUTCMinutes()).padStart(2, '0')}`;
+    }
+    // Already a string (e.g. from defaultSettings fallback)
+    return String(val).slice(0, 5); // take "HH:MM" from "HH:MM:SS" or ISO
+}
+
+function normaliseSettings(s: Record<string, unknown>): Record<string, unknown> {
+    return { ...s, defaultExpectedInTime: formatTimeField(s['defaultExpectedInTime']) };
+}
 
 export class OrgSettingsService {
     constructor(
         private readonly db: PrismaClient,
         private readonly audit: AuditService,
+        private readonly trackpilots?: TrackpilotsService,
     ) {}
 
     async getSettings(orgId: string) {
         const s = await this.db.orgDefaultSetting.findFirst({ where: { orgId } });
-        return s ?? defaultSettings(orgId);
+        return normaliseSettings((s ?? defaultSettings(orgId)) as Record<string, unknown>);
     }
 
     async updateSettings(orgId: string, actorId: string, req: Record<string, unknown>) {
@@ -21,7 +36,37 @@ export class OrgSettingsService {
             : await this.db.orgDefaultSetting.create({ data: { id: randomUUID(), orgId, updatedAt: new Date(), ...(req as any) } });
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'org.settings_updated', orgId });
-        return s;
+
+        // Best-effort: push org defaults to Trackpilots
+        if (this.trackpilots) {
+            this.pushToTrackpilots(orgId, s as Record<string, unknown>).catch(() => {});
+        }
+
+        return normaliseSettings(s as Record<string, unknown>);
+    }
+
+    private async pushToTrackpilots(orgId: string, s: Record<string, unknown>): Promise<void> {
+        const inTime = formatTimeField(s['defaultExpectedInTime']);
+        await this.trackpilots!.updateDefaultSettings(orgId, {
+            workHours: {
+                expectedWorkMinutesPerDay: Math.round(Number(s['defaultWorkHoursPerDay'] ?? 8) * 60),
+                expectedProductiveWorkMinutesPerDay: Math.round(Number(s['defaultProductiveHoursPerDay'] ?? 6) * 60),
+                expectedInTime: inTime,
+            },
+            screenshot: {
+                enableScreenCapture: Boolean(s['defaultScreenshotEnabled'] ?? true),
+                enableBlurScreenCapture: Boolean(s['defaultBlurEnabled'] ?? false),
+                screenCaptureIntervalMinutes: Number(s['defaultCaptureIntervalMinutes'] ?? 1),
+            },
+            idleAlert: {
+                enableIdleTimeAlert: Boolean(s['defaultIdleAlertEnabled'] ?? true),
+                minimumIdleTimeMinutes: Number(s['defaultMinIdleTimeMinutes'] ?? 5),
+            },
+            stealth: {
+                enableStealthMonitoring: Boolean(s['defaultStealthEnabled'] ?? false),
+            },
+            ...(s['timezone'] ? { timezone: String(s['timezone']) } : {}),
+        });
     }
 
     async listOverrides(orgId: string) {

@@ -62,34 +62,40 @@ export class ClientDashboardService {
     }
 
     async getTopApps(orgId: string, from: Date, to: Date, limit = 10, teamId?: string) {
-        const empWhere = teamId
+        const empIds = teamId
             ? await this.db.employee.findMany({ where: { orgId, teamId, deletedAt: null }, select: { id: true } })
                 .then(rows => rows.map(r => r.id))
             : undefined;
 
-        const events = await this.db.activityEvent.findMany({
+        // Aggregate in DB — avoids loading all events into memory
+        const groups = await this.db.activityEvent.groupBy({
+            by: ['appName'],
             where: {
                 orgId,
                 eventType: 'App',
                 startTime: { gte: from, lte: to },
                 appName: { not: null },
-                ...(empWhere ? { employeeId: { in: empWhere } } : {}),
+                ...(empIds ? { employeeId: { in: empIds } } : {}),
             },
-            select: { appName: true, appDomain: true, appCategory: true, productivityStatus: true, durationSeconds: true },
+            _sum: { durationSeconds: true },
+            orderBy: { _sum: { durationSeconds: 'desc' } },
+            take: limit,
         });
 
-        const groups = new Map<string, { totalDuration: number; productivityStatus: string; appDomain: string | null; appCategory: string | null }>();
-        for (const e of events) {
-            const key = e.appName!;
-            const g = groups.get(key) ?? { totalDuration: 0, productivityStatus: e.productivityStatus ?? 'Neutral', appDomain: e.appDomain, appCategory: e.appCategory };
-            g.totalDuration += e.durationSeconds ?? 0;
-            groups.set(key, g);
-        }
-
-        return Array.from(groups.entries())
-            .map(([appName, g]) => ({ appName, appDomain: g.appDomain, appCategory: g.appCategory, productivityStatus: g.productivityStatus, totalDurationSeconds: g.totalDuration }))
-            .sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds)
-            .slice(0, limit);
+        // One lightweight lookup per app for metadata (at most `limit` queries)
+        return Promise.all(groups.map(async g => {
+            const meta = await this.db.activityEvent.findFirst({
+                where: { orgId, appName: g.appName, eventType: 'App', startTime: { gte: from, lte: to } },
+                select: { appDomain: true, appCategory: true, productivityStatus: true },
+            });
+            return {
+                appName: g.appName,
+                appDomain: meta?.appDomain ?? null,
+                appCategory: meta?.appCategory ?? null,
+                productivityStatus: meta?.productivityStatus ?? 'Neutral',
+                totalDurationSeconds: g._sum.durationSeconds ?? 0,
+            };
+        }));
     }
 
     async getTodayActivityTable(orgId: string, date: Date, teamId?: string) {
@@ -197,5 +203,8 @@ export class ClientDashboardService {
 }
 
 function toDateOnly(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    // Align to IST day boundary — matches how dailySummary.job.ts keys summaryDate
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const ist = new Date(d.getTime() + IST_OFFSET_MS);
+    return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
 }

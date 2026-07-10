@@ -47,12 +47,9 @@ export class AppEventJob {
         const endTime = time.endDate ? new Date(time.endDate) : null;
         const os: string | null = tracking.operatingSystem ?? null;
         const payloadStatus: string | null = app.productivityStatus ?? null;
-
         const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
 
-        const productivity = await this.resolveProductivity(
-            mapping.orgId, appName, appDomain, payloadStatus,
-        );
+        const productivity = await this.resolveProductivity(mapping.orgId, appName, appDomain, payloadStatus);
 
         await this.db.activityEvent.create({
             data: {
@@ -71,18 +68,22 @@ export class AppEventJob {
             },
         });
 
+        // Use actual activity time for lastSeenAt, not webhook delivery time
+        const activityTime = endTime ?? startTime ?? new Date(data.occurredAt);
+
         await this.db.employee.update({
             where: { id: mapping.employeeId },
             data: {
-                lastSeenAt: new Date(data.occurredAt),
+                lastSeenAt: activityTime,
                 ...(os ? { operatingSystem: os } : {}),
                 updatedAt: new Date(),
             },
         });
 
+        // Use startTime for day bucketing so delayed webhooks land in the correct IST day
         await this.upsertDailySummary(
-            mapping.orgId, mapping.employeeId,
-            new Date(data.occurredAt), productivity, durationSeconds ?? 0,
+            mapping.orgId, mapping.employeeId, mapping.employee.teamId,
+            startTime ?? new Date(data.occurredAt), productivity, durationSeconds ?? 0,
         );
 
         await markLog(this.db, data.webhookLogId, 'Processed');
@@ -101,7 +102,6 @@ export class AppEventJob {
         payloadStatus: string | null,
     ): Promise<string> {
         if (appName) {
-            // 1. Org-level override
             const orgOverrides = await this.db.orgProductivityOverride.findMany({ where: { orgId } });
             const orgMatch = orgOverrides.find(o =>
                 matchPattern(o.appNamePattern, appName) &&
@@ -109,7 +109,6 @@ export class AppEventJob {
             );
             if (orgMatch) return orgMatch.overriddenStatus;
 
-            // 2. Global classification
             const globals = await this.db.globalProductivityClassification.findMany();
             const globalMatch = globals.find(g =>
                 matchPattern(g.appNamePattern, appName) &&
@@ -118,62 +117,44 @@ export class AppEventJob {
             if (globalMatch) return globalMatch.defaultStatus;
         }
 
-        // 3. Payload status → 4. Default Neutral
         return normaliseStatus(payloadStatus) ?? 'Neutral';
     }
 
     private async upsertDailySummary(
-        orgId: string, employeeId: string, date: Date,
+        orgId: string, employeeId: string, teamId: string | null, date: Date,
         status: string, durationSeconds: number,
     ): Promise<void> {
-        const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-
-        const existing = await this.db.dailySummary.findFirst({
-            where: { orgId, employeeId, summaryDate: dayStart },
-        });
+        // IST-aligned day boundary to match dailySummary.job.ts keying
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+        const dayStart = new Date(Date.UTC(istDate.getUTCFullYear(), istDate.getUTCMonth(), istDate.getUTCDate()));
 
         const productive = status === 'Productive' ? durationSeconds : 0;
         const unproductive = status === 'Unproductive' ? durationSeconds : 0;
         const neutral = status === 'Neutral' ? durationSeconds : 0;
 
-        if (existing) {
-            const newProductive = existing.productiveSeconds + productive;
-            const newUnproductive = existing.unproductiveSeconds + unproductive;
-            const newNeutral = existing.neutralSeconds + neutral;
-            const total = newProductive + newUnproductive + newNeutral;
-            const score = total > 0
-                ? Math.round((newProductive / total) * 100 * 100) / 100
-                : null;
-
-            await this.db.dailySummary.update({
-                where: { id: existing.id },
-                data: {
-                    productiveSeconds: newProductive,
-                    unproductiveSeconds: newUnproductive,
-                    neutralSeconds: newNeutral,
-                    productivityScore: score,
-                    isPresent: true,
-                    updatedAt: new Date(),
-                },
-            });
-        } else {
-            const total = productive + unproductive + neutral;
-            const score = total > 0 ? Math.round((productive / total) * 100 * 100) / 100 : null;
-
-            await this.db.dailySummary.create({
-                data: {
-                    id: crypto.randomUUID(),
-                    orgId, employeeId,
-                    summaryDate: dayStart,
-                    productiveSeconds: productive,
-                    unproductiveSeconds: unproductive,
-                    neutralSeconds: neutral,
-                    productivityScore: score,
-                    isPresent: true,
-                    updatedAt: new Date(),
-                },
-            });
-        }
+        // Atomic upsert — no read-modify-write race condition
+        // Score is intentionally omitted here; the 5-min cron recalculates it from raw events
+        await this.db.dailySummary.upsert({
+            where: { orgId_employeeId_summaryDate: { orgId, employeeId, summaryDate: dayStart } },
+            update: {
+                productiveSeconds: { increment: productive },
+                unproductiveSeconds: { increment: unproductive },
+                neutralSeconds: { increment: neutral },
+                isPresent: true,
+                updatedAt: new Date(),
+            },
+            create: {
+                id: crypto.randomUUID(),
+                orgId, employeeId, teamId,
+                summaryDate: dayStart,
+                productiveSeconds: productive,
+                unproductiveSeconds: unproductive,
+                neutralSeconds: neutral,
+                isPresent: true,
+                updatedAt: new Date(),
+            },
+        });
     }
 }
 

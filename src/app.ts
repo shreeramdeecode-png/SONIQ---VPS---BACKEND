@@ -52,6 +52,7 @@ import { clientAttendanceRoutes } from './routes/client/attendance.routes.js';
 import { clientScreenshotRoutes } from './routes/client/screenshots.routes.js';
 import { clientReportRoutes } from './routes/client/reports.routes.js';
 import { clientOrgSettingsRoutes } from './routes/client/orgSettings.routes.js';
+import { clientIntegrationRoutes } from './routes/client/integration.routes.js';
 import { webhookRoutes } from './routes/webhook.routes.js';
 import { setupLiveStatusHub } from './hubs/liveStatus.hub.js';
 
@@ -143,19 +144,19 @@ export async function buildApp(): Promise<FastifyInstance> {
 
     // SuperAdmin
     const orgMgmt = new OrgManagementService(app.prisma, audit, encryption);
-    const agentSync = new AgentSyncService(app.prisma, trackpilots, audit);
+    const agentSync = new AgentSyncService(app.prisma, trackpilots, audit, passwords);
     const dashboard = new DashboardService(app.prisma);
     const platformSettings = new PlatformSettingsService(app.prisma, audit);
 
     // Client Portal
     const clientDashboard = new ClientDashboardService(app.prisma);
-    const teams = new TeamService(app.prisma, audit);
-    const employees = new EmployeeService(app.prisma, audit, passwords);
+    const teams = new TeamService(app.prisma, audit, trackpilots);
+    const employees = new EmployeeService(app.prisma, audit, passwords, trackpilots);
     const roles = new RoleService(app.prisma, audit);
     const attendance = new AttendanceService(app.prisma);
     const screenshots = new ScreenshotService(app.prisma, storage);
     const reports = new ReportsService(app.prisma);
-    const orgSettings = new OrgSettingsService(app.prisma, audit);
+    const orgSettings = new OrgSettingsService(app.prisma, audit, trackpilots);
 
     // ── Middleware ────────────────────────────────────────────────────────────
     // Serve locally-stored screenshots
@@ -188,6 +189,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await clientScreenshotRoutes(app, screenshots);
     await clientReportRoutes(app, reports);
     await clientOrgSettingsRoutes(app, orgSettings, roles);
+    await clientIntegrationRoutes(app, app.prisma, agentSync, encryption);
 
     await webhookRoutes(app, app.prisma, app.boss, encryption);
 
@@ -211,31 +213,63 @@ export async function registerJobs(
     const screenshotJob = new ScreenshotEventJob(app.prisma, storage);
     const dailySummaryJob = new DailySummaryJob(app.prisma);
 
-    // pg-boss v10 handlers receive an array of jobs
-    app.boss.work('activity-tracking', async (jobs) => {
-        for (const job of jobs) await activityJob.execute(job.data as any);
-    });
-
-    app.boss.work('app-tracking', async (jobs) => {
-        for (const job of jobs) await appJob.execute(job.data as any);
-    });
-
-    app.boss.work('screenshot-processing', async (jobs) => {
-        for (const job of jobs) await screenshotJob.execute(job.data as any);
-    });
-
-    app.boss.work('daily-aggregation', async (jobs) => {
-        for (const job of jobs) {
-            const date = new Date((job.data as any).date ?? Date.now());
-            await dailySummaryJob.execute(date);
+    // pg-boss v10 handlers — each worker processes one job at a time so failures are isolated
+    app.boss.work('activity-tracking', { batchSize: 1 }, async (jobs) => {
+        const job = jobs[0];
+        try {
+            await activityJob.execute(job.data as any);
+        } catch (err) {
+            app.log.error({ err, jobId: job.id }, 'activity-tracking job failed');
+            throw err;
         }
     });
 
-    // Recurring daily summary — every 5 minutes
-    await app.boss.createQueue('daily-summary-cron');
-    await app.boss.schedule('daily-summary-cron', '*/5 * * * *', { date: new Date().toISOString() });
+    app.boss.work('app-tracking', { batchSize: 1 }, async (jobs) => {
+        const job = jobs[0];
+        try {
+            await appJob.execute(job.data as any);
+        } catch (err) {
+            app.log.error({ err, jobId: job.id }, 'app-tracking job failed');
+            throw err;
+        }
+    });
+
+    // Screenshot processing: teamSize:1 for isolation, retries configured at send time
+    app.boss.work('screenshot-processing', { batchSize: 1 }, async (jobs) => {
+        const job = jobs[0];
+        try {
+            await screenshotJob.execute(job.data as any);
+        } catch (err) {
+            app.log.error({ err, jobId: job.id }, 'screenshot-processing job failed');
+            throw err;
+        }
+    });
+
+    app.boss.work('daily-aggregation', { batchSize: 1 }, async (jobs) => {
+        const job = jobs[0];
+        try {
+            const date = new Date((job.data as any).date ?? Date.now());
+            await dailySummaryJob.execute(date);
+        } catch (err) {
+            app.log.error({ err, jobId: job.id }, 'daily-aggregation job failed');
+            throw err;
+        }
+    });
+
+    // Recurring daily summary — every 5 minutes, guard against duplicate schedule on restart
+    try {
+        await app.boss.createQueue('daily-summary-cron');
+    } catch { /* queue already exists — fine */ }
+    try {
+        await app.boss.schedule('daily-summary-cron', '*/5 * * * *');
+    } catch { /* schedule already exists — fine */ }
     app.boss.work('daily-summary-cron', async () => {
-        await dailySummaryJob.execute(new Date());
+        try {
+            await dailySummaryJob.execute(new Date());
+        } catch (err) {
+            app.log.error({ err }, 'daily-summary-cron failed');
+            throw err;
+        }
     });
 }
 
