@@ -76,6 +76,7 @@ export class AppEventJob {
         await this.db.employee.update({
             where: { id: mapping.employeeId },
             data: {
+                isCurrentlyWorking: true,
                 lastSeenAt: activityTime,
                 ...(os ? { operatingSystem: os } : {}),
                 updatedAt: new Date(),
