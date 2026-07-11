@@ -158,7 +158,12 @@ export class TeamService {
                 await this.db.agentTeamMapping.create({
                     data: { id: randomUUID(), teamId: team.id, orgId, agentProvider: 'trackpilots', externalTeamId: tpTeam.id },
                 });
-            } catch { /* non-fatal */ }
+                console.log(`[TP-SYNC] OK — created team in Trackpilots externalTeamId=${tpTeam.id} name="${name}"`);
+            } catch (err: any) {
+                const status = err?.response?.status ?? '';
+                const body = err?.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : '';
+                console.error(`[TP-SYNC] FAILED to create team "${name}": ${status} ${err?.message ?? err} ${body}`);
+            }
         }
 
         return { id: team.id, name: team.name, employeeCount: 0, activeNow: 0, offline: 0, presentToday: 0, avgProductivityScore: null, createdAt: team.createdAt };
@@ -179,7 +184,11 @@ export class TeamService {
                 where: { teamId, orgId, agentProvider: 'trackpilots' },
             });
             if (mapping) {
-                this.trackpilots.updateTeam(orgId, mapping.externalTeamId, name).catch(() => {});
+                this.trackpilots.updateTeam(orgId, mapping.externalTeamId, name)
+                    .then(() => console.log(`[TP-SYNC] OK — renamed team in Trackpilots externalTeamId=${mapping.externalTeamId} → "${name}"`))
+                    .catch((err: any) => console.error(`[TP-SYNC] FAILED to rename team ${mapping.externalTeamId}: ${err?.response?.status ?? ''} ${err?.message ?? err} ${err?.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : ''}`));
+            } else {
+                console.warn(`[TP-SYNC] no Trackpilots mapping for team ${teamId} — rename NOT pushed`);
             }
         }
 
@@ -197,7 +206,9 @@ export class TeamService {
                 where: { teamId, orgId, agentProvider: 'trackpilots' },
             });
             if (mapping) {
-                this.trackpilots.deleteTeam(orgId, mapping.externalTeamId).catch(() => {});
+                this.trackpilots.deleteTeam(orgId, mapping.externalTeamId)
+                    .then(() => console.log(`[TP-SYNC] OK — deleted team in Trackpilots externalTeamId=${mapping.externalTeamId}`))
+                    .catch((err: any) => console.error(`[TP-SYNC] FAILED to delete team ${mapping.externalTeamId}: ${err?.response?.status ?? ''} ${err?.message ?? err} ${err?.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : ''}`));
             }
         }
 

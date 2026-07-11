@@ -147,7 +147,9 @@ export class EmployeeService {
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.updated',
             orgId, targetType: 'Employee', targetId: employeeId, after: updated.name });
 
-        // Best-effort: sync profile changes to Trackpilots
+        // Best-effort: sync profile changes to Trackpilots.
+        // Trackpilots requires roleId + teams on EVERY employee update (even a name-only change),
+        // so we always resolve the current team external IDs and role, and send the current name.
         await this.syncToTrackpilots(orgId, employeeId, async (extId) => {
             const teamIds: string[] = [];
             if (updated.teamId) {
@@ -156,10 +158,21 @@ export class EmployeeService {
                 });
                 if (tm) teamIds.push(tm.externalTeamId);
             }
+            // Resolve the Trackpilots role by matching the employee's role name (same as invite flow)
+            let roleId: string | undefined;
+            try {
+                const roles = await this.trackpilots.fetchAccessRoles(orgId);
+                const roleName = (updated.role?.name ?? '').toLowerCase();
+                roleId = roles.find(r => r.name.toLowerCase() === roleName)?.id
+                    ?? roles.find(r => r.name.toLowerCase() === 'employee')?.id
+                    ?? roles[0]?.id;
+            } catch { /* role lookup failed — send without, Trackpilots will report if required */ }
+
             await this.trackpilots.updateEmployee(orgId, extId, {
-                ...(req.name ? { name: req.name } : {}),
+                name: req.name ?? updated.name,
+                teamIds,
+                roleId,
                 ...(req.workMode ? { workMode: req.workMode } : {}),
-                ...(req.teamId !== undefined ? { teamIds } : {}),
             });
         });
 

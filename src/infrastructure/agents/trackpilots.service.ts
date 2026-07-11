@@ -115,8 +115,10 @@ export class TrackpilotsService {
 
     async updateEmployee(orgId: string, externalUserId: string, data: { name?: string; teamIds?: string[]; roleId?: string; workMode?: string }): Promise<AgentEmployee> {
         const apiKey = await this.getApiKey(orgId);
+        // Trackpilots' update endpoint requires roleId (string) and teams (array) on every call,
+        // and uses the "teams" key (not "teamId" like create). Caller must supply current values.
         const { data: res } = await this.http.patch('v1/employees',
-            { userId: externalUserId, userName: data.name, teamId: data.teamIds, roleId: data.roleId, workMode: data.workMode },
+            { userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId, workMode: data.workMode },
             { headers: this.auth(apiKey) });
         return { id: res.response.userId, email: '', name: res.response.userName };
     }
@@ -150,7 +152,7 @@ export class TrackpilotsService {
                 workHourSettings: {
                     expectedWorkMinutesPerDay: s.expectedWorkMinutesPerDay,
                     expectedProductiveWorkMinutesPerDay: s.expectedProductiveWorkMinutesPerDay,
-                    expectedInTime: s.expectedInTime,
+                    expectedInTime: to12Hour(s.expectedInTime), // Trackpilots requires "hh:mm am/pm"
                 },
             },
             { headers: this.auth(apiKey) });
@@ -198,7 +200,7 @@ export class TrackpilotsService {
         const apiKey = await this.getApiKey(orgId);
         const body: Record<string, unknown> = {};
         if (s.workDays) body['workDaySettings'] = { workDays: s.workDays };
-        if (s.workHours) body['workHourSettings'] = s.workHours;
+        if (s.workHours) body['workHourSettings'] = { ...s.workHours, expectedInTime: to12Hour(s.workHours.expectedInTime) };
         if (s.screenshot) body['screenshotSettings'] = s.screenshot;
         if (s.idleAlert) body['idleAlertSettings'] = s.idleAlert;
         if (s.stealth) body['stealthMonitoringSettings'] = s.stealth;
@@ -299,3 +301,17 @@ const mapRole = (r: { roleId: string; roleName: string; roleData: Array<{ path: 
     name: r.roleName,
     permissions: r.roleData,
 });
+
+// Trackpilots expects times as 12-hour "hh:mm am/pm". Accepts "HH:mm" or "HH:mm:ss" (24-hour).
+function to12Hour(t: string): string {
+    if (!t) return '08:00 am';
+    if (/am|pm/i.test(t)) return t.toLowerCase(); // already 12-hour
+    const [hRaw, mRaw] = t.split(':');
+    let h = parseInt(hRaw, 10);
+    if (Number.isNaN(h)) return '08:00 am';
+    const m = (mRaw ?? '00').slice(0, 2).padStart(2, '0');
+    const ampm = h >= 12 ? 'pm' : 'am';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${String(h).padStart(2, '0')}:${m} ${ampm}`;
+}
