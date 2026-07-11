@@ -167,16 +167,16 @@ export class TrackpilotsService {
 
     async updateScreenshotSettings(orgId: string, externalUserId: string, s: AgentScreenshotSettings): Promise<boolean> {
         const apiKey = await this.getApiKey(orgId);
-        const sent = {
-            enableScreenCapture: s.enableScreenCapture,
-            enableBlurScreenCapture: s.enableBlurScreenCapture,
-            screenCaptureIntervalMinutes: s.screenCaptureIntervalMinutes,
-        };
-        const { status, data } = await this.http.patch('v1/settings/screenshot',
-            { userId: externalUserId, screenshotSettings: sent },
+        const { status } = await this.http.patch('v1/settings/screenshot',
+            {
+                userId: externalUserId,
+                screenshotSettings: {
+                    enableScreenCapture: s.enableScreenCapture,
+                    enableBlurScreenCapture: s.enableBlurScreenCapture,
+                    screenCaptureIntervalMinutes: s.screenCaptureIntervalMinutes,
+                },
+            },
             { headers: this.auth(apiKey) });
-        // TEMP DIAGNOSTIC — reveal what Trackpilots stored back (esp. the blur field name)
-        console.log(`[TP-SYNC] screenshot SENT: ${JSON.stringify(sent)} | RESPONSE: ${JSON.stringify(data?.data ?? data).slice(0, 500)}`);
         return status < 300;
     }
 
