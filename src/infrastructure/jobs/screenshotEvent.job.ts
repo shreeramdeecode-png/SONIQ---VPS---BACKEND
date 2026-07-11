@@ -71,23 +71,31 @@ export class ScreenshotEventJob {
         const app = screenshot.app ?? {};
         const time = screenshot.time ?? {};
 
-        // TEMP DIAGNOSTIC — reveal imageBuffer's real type/contents
-        try {
-            const ib = screenshot.imageBuffer;
-            const ibType = Array.isArray(ib) ? 'array' : typeof ib;
-            let ibPreview: string;
-            if (typeof ib === 'string') ibPreview = `str(len=${ib.length}):${ib.slice(0, 80)}`;
-            else if (ib && typeof ib === 'object') ibPreview = `keys=[${Object.keys(ib).join(',')}] :: ${JSON.stringify(ib).slice(0, 300)}`;
-            else ibPreview = String(ib);
-            console.log('[SS-DIAG2] imageBuffer type:', ibType, '| preview:', ibPreview);
-            console.log('[SS-DIAG2] app:', JSON.stringify(screenshot.app), '| time:', JSON.stringify(screenshot.time));
-        } catch (e) { console.log('[SS-DIAG2] error', e); }
-
-        // Trackpilots may send imageBuffer as a non-string (object/array) in some agent versions
+        // Trackpilots sends imageBuffer in one of three forms:
+        //   1. { type: 'Buffer', data: [...] } — a JSON-serialized Node Buffer (raw JPEG bytes)
+        //   2. an http(s) URL string
+        //   3. a base64 string, or a '[simulation...]' placeholder
         const rawImageBuffer = screenshot.imageBuffer;
-        const imageBuffer: string | null = typeof rawImageBuffer === 'string' ? rawImageBuffer : null;
-        const isSimulation = !imageBuffer || imageBuffer.startsWith('[simulation');
-        if (isSimulation) {
+        let imageUrl: string | null = null;
+        let imageBinary: Buffer | null = null;
+
+        if (rawImageBuffer && typeof rawImageBuffer === 'object'
+            && (rawImageBuffer as any).type === 'Buffer' && Array.isArray((rawImageBuffer as any).data)) {
+            imageBinary = Buffer.from((rawImageBuffer as any).data);
+        } else if (typeof rawImageBuffer === 'string') {
+            if (rawImageBuffer.startsWith('[simulation')) {
+                await markLog(this.db, data.webhookLogId, 'Processed');
+                return;
+            }
+            if (rawImageBuffer.startsWith('http')) {
+                imageUrl = rawImageBuffer;
+            } else {
+                imageBinary = Buffer.from(rawImageBuffer, 'base64');
+            }
+        }
+
+        // No usable image payload — mark processed (not failed) to avoid retry storms
+        if (!imageUrl && (!imageBinary || imageBinary.length === 0)) {
             await markLog(this.db, data.webhookLogId, 'Processed');
             return;
         }
@@ -104,17 +112,10 @@ export class ScreenshotEventJob {
         const capturedAt = time.capturedAt ? new Date(time.capturedAt) : new Date(data.occurredAt);
         const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
 
-        const imageUrl = imageBuffer.startsWith('http') ? imageBuffer : null;
-        const imageBase64 = !imageBuffer.startsWith('http') ? imageBuffer : null;
-        if (!imageUrl && !imageBase64) {
-            await markLog(this.db, data.webhookLogId, 'Failed');
-            return;
-        }
-
         const screenshotId = crypto.randomUUID();
         const keyPrefix = `${mapping.orgId}/${mapping.employeeId}/${screenshotId}`;
 
-        const { fullKey, thumbKey } = await this.downloadAndUpload(imageUrl, imageBase64, keyPrefix, blurEnabled);
+        const { fullKey, thumbKey } = await this.downloadAndUpload(imageUrl, imageBinary, keyPrefix, blurEnabled);
 
         // IST-aligned day boundary to match dailySummary keying
         const capturedAtIst = new Date(capturedAt.getTime() + IST_OFFSET_MS);
@@ -152,7 +153,7 @@ export class ScreenshotEventJob {
     }
 
     private async downloadAndUpload(
-        sourceUrl: string | null, sourceBase64: string | null, keyPrefix: string, blur: boolean,
+        sourceUrl: string | null, sourceBinary: Buffer | null, keyPrefix: string, blur: boolean,
     ): Promise<{ fullKey: string; thumbKey: string }> {
         let buf: Buffer;
         if (sourceUrl) {
@@ -163,7 +164,7 @@ export class ScreenshotEventJob {
             });
             buf = Buffer.from(res.data as ArrayBuffer);
         } else {
-            buf = Buffer.from(sourceBase64!, 'base64');
+            buf = sourceBinary!;
         }
 
         if (buf.length === 0) throw new Error('Empty image buffer received');
