@@ -3,17 +3,28 @@ import type { PrismaClient } from '@prisma/client';
 export class ClientDashboardService {
     constructor(private readonly db: PrismaClient) {}
 
-    async getTodayStats(orgId: string, teamId?: string) {
+    async getTodayStats(orgId: string, teamId?: string, from?: Date, to?: Date) {
         const today = toDateOnly(new Date());
         const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
 
-        const [totalEmployees, activeNow, summaries] = await Promise.all([
+        // Productivity metrics honor the selected date range; live counts always reflect "now".
+        const rangeFilter = from && to
+            ? { summaryDate: { gte: toDateOnly(from), lte: toDateOnly(to) } }
+            : { summaryDate: today };
+
+        const [totalEmployees, activeNow, summaries, todaySummaries] = await Promise.all([
             this.db.employee.count({ where: empWhere }),
             this.db.employee.count({ where: { ...empWhere, isCurrentlyWorking: true } }),
+            this.db.dailySummary.findMany({ where: { orgId, ...rangeFilter, ...(teamId ? { teamId } : {}) } }),
             this.db.dailySummary.findMany({ where: { orgId, summaryDate: today, ...(teamId ? { teamId } : {}) } }),
         ]);
 
-        const presentToday = summaries.filter(s => s.isPresent).length;
+        // "Checked in today" is a live figure — always today, regardless of the selected range
+        const presentToday = todaySummaries.filter(s => s.isPresent).length;
+
+        // Present employee-days across the range — the denominator for a true per-day work average
+        const presentEmployeeDays = summaries.filter(s => s.isPresent).length;
+
         const scored = summaries.filter(s => s.productivityScore != null);
         const avgScore = scored.length > 0
             ? Math.round((scored.reduce((sum, s) => sum + Number(s.productivityScore!), 0) / scored.length) * 100) / 100
@@ -26,8 +37,8 @@ export class ClientDashboardService {
         const totalUnproductiveSeconds = summaries.reduce((sum, s) => sum + (s.unproductiveSeconds ?? 0), 0);
         const totalIdleSeconds = summaries.reduce((sum, s) => sum + (s.idleSeconds ?? 0), 0);
 
-        // Average work time per present employee (drives Org Health "Avg work time / day")
-        const avgWorkSecondsPerDay = presentToday > 0 ? Math.round(totalWorkSeconds / presentToday) : 0;
+        // Average work time per present employee-day (drives Org Health "Avg work time / day")
+        const avgWorkSecondsPerDay = presentEmployeeDays > 0 ? Math.round(totalWorkSeconds / presentEmployeeDays) : 0;
 
         return {
             date: today, totalEmployees, activeNow, avgProductivityScore: avgScore,

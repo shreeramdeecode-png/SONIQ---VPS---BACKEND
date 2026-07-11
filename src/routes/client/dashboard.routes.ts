@@ -27,7 +27,11 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
 
     app.get('/api/client/dashboard/stats', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        return svc.getTodayStats(req.orgId, q['teamId']);
+        // from/to (YYYY-MM-DD) scope the productivity metrics; omitted → today only.
+        // The service applies toDateOnly() to IST-align these to summaryDate keys.
+        const from = q['from'] ? parseDate(q['from']) : undefined;
+        const to = q['to'] ? parseDate(q['to']) : undefined;
+        return svc.getTodayStats(req.orgId, q['teamId'], from, to);
     });
 
     app.get('/api/client/dashboard/top-productive', { preHandler: [auth] }, async (req) => {
