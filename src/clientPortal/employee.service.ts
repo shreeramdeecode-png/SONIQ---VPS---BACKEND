@@ -172,7 +172,8 @@ export class EmployeeService {
                 name: req.name ?? updated.name,
                 teamIds,
                 roleId,
-                ...(req.workMode ? { workMode: req.workMode } : {}),
+                // Trackpilots requires workMode on every update — send the current value
+                workMode: req.workMode ?? updated.workModeType ?? undefined,
             });
         });
 

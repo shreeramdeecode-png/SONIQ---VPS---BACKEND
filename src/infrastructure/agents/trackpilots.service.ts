@@ -118,15 +118,15 @@ export class TrackpilotsService {
         // Trackpilots' update endpoint requires roleId (string) and teams (array) on every call,
         // uses the "teams" key (not "teamId" like create), and expects workMode lowercase
         // (SONIQ stores it capitalized: "Office"/"Remote"/"Hybrid").
+        // workMode is REQUIRED by Trackpilots (a missing value still returns "Invalid option").
+        // Always send a valid lowercase value, defaulting to 'office' when unknown/invalid.
         const wm = data.workMode?.toLowerCase();
-        const workMode = wm && ['remote', 'office', 'hybrid'].includes(wm) ? wm : undefined;
-        const body = {
-            userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId,
-            ...(workMode ? { workMode } : {}),
-        };
-        // TEMP DIAGNOSTIC — reveal the exact workMode value and full body being sent
-        console.log(`[TP-SYNC] updateEmployee raw workMode=${JSON.stringify(data.workMode)} normalized=${JSON.stringify(workMode)} | body=${JSON.stringify(body)}`);
-        const { data: res } = await this.http.patch('v1/employees', body, { headers: this.auth(apiKey) });
+        const workMode = wm && ['remote', 'office', 'hybrid'].includes(wm) ? wm : 'office';
+        const { data: res } = await this.http.patch('v1/employees',
+            {
+                userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId, workMode,
+            },
+            { headers: this.auth(apiKey) });
         return { id: res.response.userId, email: '', name: res.response.userName };
     }
 
