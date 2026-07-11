@@ -116,9 +116,15 @@ export class TrackpilotsService {
     async updateEmployee(orgId: string, externalUserId: string, data: { name?: string; teamIds?: string[]; roleId?: string; workMode?: string }): Promise<AgentEmployee> {
         const apiKey = await this.getApiKey(orgId);
         // Trackpilots' update endpoint requires roleId (string) and teams (array) on every call,
-        // and uses the "teams" key (not "teamId" like create). Caller must supply current values.
+        // uses the "teams" key (not "teamId" like create), and expects workMode lowercase
+        // (SONIQ stores it capitalized: "Office"/"Remote"/"Hybrid").
+        const wm = data.workMode?.toLowerCase();
+        const workMode = wm && ['remote', 'office', 'hybrid'].includes(wm) ? wm : undefined;
         const { data: res } = await this.http.patch('v1/employees',
-            { userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId, workMode: data.workMode },
+            {
+                userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId,
+                ...(workMode ? { workMode } : {}),
+            },
             { headers: this.auth(apiKey) });
         return { id: res.response.userId, email: '', name: res.response.userName };
     }
@@ -161,16 +167,16 @@ export class TrackpilotsService {
 
     async updateScreenshotSettings(orgId: string, externalUserId: string, s: AgentScreenshotSettings): Promise<boolean> {
         const apiKey = await this.getApiKey(orgId);
-        const { status } = await this.http.patch('v1/settings/screenshot',
-            {
-                userId: externalUserId,
-                screenshotSettings: {
-                    enableScreenCapture: s.enableScreenCapture,
-                    enableBlurScreenCapture: s.enableBlurScreenCapture,
-                    screenCaptureIntervalMinutes: s.screenCaptureIntervalMinutes,
-                },
-            },
+        const sent = {
+            enableScreenCapture: s.enableScreenCapture,
+            enableBlurScreenCapture: s.enableBlurScreenCapture,
+            screenCaptureIntervalMinutes: s.screenCaptureIntervalMinutes,
+        };
+        const { status, data } = await this.http.patch('v1/settings/screenshot',
+            { userId: externalUserId, screenshotSettings: sent },
             { headers: this.auth(apiKey) });
+        // TEMP DIAGNOSTIC — reveal what Trackpilots stored back (esp. the blur field name)
+        console.log(`[TP-SYNC] screenshot SENT: ${JSON.stringify(sent)} | RESPONSE: ${JSON.stringify(data?.data ?? data).slice(0, 500)}`);
         return status < 300;
     }
 
