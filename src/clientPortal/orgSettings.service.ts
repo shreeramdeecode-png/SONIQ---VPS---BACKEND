@@ -37,9 +37,15 @@ export class OrgSettingsService {
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'org.settings_updated', orgId });
 
-        // Best-effort: push org defaults to Trackpilots
+        // Best-effort: push org defaults to Trackpilots. Logs outcome — grep pm2 for "[TP-SYNC]".
         if (this.trackpilots) {
-            this.pushToTrackpilots(orgId, s as Record<string, unknown>).catch(() => {});
+            this.pushToTrackpilots(orgId, s as Record<string, unknown>)
+                .then(() => console.log(`[TP-SYNC] OK — pushed org default settings to Trackpilots for org=${orgId}`))
+                .catch((err: any) => {
+                    const status = err?.response?.status ?? '';
+                    const body = err?.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : '';
+                    console.error(`[TP-SYNC] FAILED org default settings for org=${orgId}: ${status} ${err?.message ?? err} ${body}`);
+                });
         }
 
         return normaliseSettings(s as Record<string, unknown>);

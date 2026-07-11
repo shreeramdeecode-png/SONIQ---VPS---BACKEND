@@ -405,7 +405,9 @@ export class EmployeeService {
         return this.buildSettings(orgId, employeeId);
     }
 
-    // Looks up the agent mapping and runs fn against the external user ID; errors are swallowed
+    // Looks up the agent mapping and runs fn against the external user ID.
+    // Best-effort (never throws, so the SONIQ save still succeeds) but logs the outcome so the
+    // Trackpilots push can be verified — grep pm2 logs for "[TP-SYNC]".
     private async syncToTrackpilots(
         orgId: string, employeeId: string,
         fn: (externalUserId: string) => Promise<unknown>,
@@ -414,7 +416,18 @@ export class EmployeeService {
             where: { employeeId, orgId, agentProvider: 'trackpilots' },
             select: { externalUserId: true },
         });
-        if (mapping) await fn(mapping.externalUserId).catch(() => {});
+        if (!mapping) {
+            console.warn(`[TP-SYNC] no Trackpilots mapping for employee ${employeeId} — settings NOT pushed`);
+            return;
+        }
+        try {
+            await fn(mapping.externalUserId);
+            console.log(`[TP-SYNC] OK — pushed to Trackpilots for externalUserId=${mapping.externalUserId}`);
+        } catch (err: any) {
+            const status = err?.response?.status ?? '';
+            const body = err?.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : '';
+            console.error(`[TP-SYNC] FAILED for externalUserId=${mapping.externalUserId}: ${status} ${err?.message ?? err} ${body}`);
+        }
     }
 
     private async buildSettings(orgId: string, employeeId: string) {
