@@ -71,20 +71,17 @@ export class ScreenshotEventJob {
         const app = screenshot.app ?? {};
         const time = screenshot.time ?? {};
 
-        // TEMP DIAGNOSTIC — dump payload shape to find where image data now lives
+        // TEMP DIAGNOSTIC — reveal imageBuffer's real type/contents
         try {
-            const shape = (o: any, depth = 0): any => {
-                if (o === null || o === undefined) return typeof o;
-                if (typeof o === 'string') return `string(len=${o.length}):${o.slice(0, 40)}`;
-                if (typeof o !== 'object') return typeof o;
-                if (depth > 3) return '…';
-                if (Array.isArray(o)) return [`array(len=${o.length})`, o.length ? shape(o[0], depth + 1) : null];
-                const out: any = {};
-                for (const k of Object.keys(o)) out[k] = shape(o[k], depth + 1);
-                return out;
-            };
-            console.log('[SS-DIAG] payload shape:', JSON.stringify(shape(payload)));
-        } catch (e) { console.log('[SS-DIAG] shape error', e); }
+            const ib = screenshot.imageBuffer;
+            const ibType = Array.isArray(ib) ? 'array' : typeof ib;
+            let ibPreview: string;
+            if (typeof ib === 'string') ibPreview = `str(len=${ib.length}):${ib.slice(0, 80)}`;
+            else if (ib && typeof ib === 'object') ibPreview = `keys=[${Object.keys(ib).join(',')}] :: ${JSON.stringify(ib).slice(0, 300)}`;
+            else ibPreview = String(ib);
+            console.log('[SS-DIAG2] imageBuffer type:', ibType, '| preview:', ibPreview);
+            console.log('[SS-DIAG2] app:', JSON.stringify(screenshot.app), '| time:', JSON.stringify(screenshot.time));
+        } catch (e) { console.log('[SS-DIAG2] error', e); }
 
         // Trackpilots may send imageBuffer as a non-string (object/array) in some agent versions
         const rawImageBuffer = screenshot.imageBuffer;
