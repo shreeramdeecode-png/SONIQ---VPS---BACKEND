@@ -148,7 +148,9 @@ export class ClientDashboardService {
                 presentDays,
                 expectedHours: expectedH,
             };
-        });
+        // Only employees with real activity in the window belong in wellbeing signals —
+        // drop inactive users (no present days) so they don't clutter the card.
+        }).filter(r => r.presentDays > 0);
     }
 
     async getTopProductive(orgId: string, date: Date, limit = 5, teamId?: string) {
