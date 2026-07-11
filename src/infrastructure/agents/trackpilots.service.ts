@@ -129,10 +129,15 @@ export class TrackpilotsService {
 
     // ── Settings ──────────────────────────────────────────────────────────────
 
+    // NOTE: Trackpilots' per-user settings endpoints expect the settings wrapped in a named object
+    // (workDaySettings / workHourSettings / screenshotSettings / idleAlertSettings /
+    // stealthMonitoringSettings) alongside a top-level userId — same wrapper keys as default-setting.
+    // Sending flat fields returns 400 REQUEST_VALIDATION_FAILED ("expected object, received undefined").
+
     async updateWorkDaySettings(orgId: string, externalUserId: string, s: AgentWorkDaySettings): Promise<boolean> {
         const apiKey = await this.getApiKey(orgId);
         const { status } = await this.http.patch('v1/settings/work-day',
-            { userId: externalUserId, workDays: s.workDays },
+            { userId: externalUserId, workDaySettings: { workDays: s.workDays } },
             { headers: this.auth(apiKey) });
         return status < 300;
     }
@@ -142,9 +147,11 @@ export class TrackpilotsService {
         const { status } = await this.http.patch('v1/settings/expected-work-hours',
             {
                 userId: externalUserId,
-                expectedWorkMinutesPerDay: s.expectedWorkMinutesPerDay,
-                expectedProductiveWorkMinutesPerDay: s.expectedProductiveWorkMinutesPerDay,
-                expectedInTime: s.expectedInTime,
+                workHourSettings: {
+                    expectedWorkMinutesPerDay: s.expectedWorkMinutesPerDay,
+                    expectedProductiveWorkMinutesPerDay: s.expectedProductiveWorkMinutesPerDay,
+                    expectedInTime: s.expectedInTime,
+                },
             },
             { headers: this.auth(apiKey) });
         return status < 300;
@@ -155,9 +162,11 @@ export class TrackpilotsService {
         const { status } = await this.http.patch('v1/settings/screenshot',
             {
                 userId: externalUserId,
-                enableScreenCapture: s.enableScreenCapture,
-                enableBlurScreenCapture: s.enableBlurScreenCapture,
-                screenCaptureIntervalMinutes: s.screenCaptureIntervalMinutes,
+                screenshotSettings: {
+                    enableScreenCapture: s.enableScreenCapture,
+                    enableBlurScreenCapture: s.enableBlurScreenCapture,
+                    screenCaptureIntervalMinutes: s.screenCaptureIntervalMinutes,
+                },
             },
             { headers: this.auth(apiKey) });
         return status < 300;
@@ -168,8 +177,10 @@ export class TrackpilotsService {
         const { status } = await this.http.patch('v1/settings/idle-alert',
             {
                 userId: externalUserId,
-                minimumIdleTimeMinutes: s.minimumIdleTimeMinutes,
-                enableIdleTimeAlert: s.enableIdleTimeAlert,
+                idleAlertSettings: {
+                    minimumIdleTimeMinutes: s.minimumIdleTimeMinutes,
+                    enableIdleTimeAlert: s.enableIdleTimeAlert,
+                },
             },
             { headers: this.auth(apiKey) });
         return status < 300;
@@ -178,7 +189,7 @@ export class TrackpilotsService {
     async updateStealthSettings(orgId: string, externalUserId: string, s: AgentStealthSettings): Promise<boolean> {
         const apiKey = await this.getApiKey(orgId);
         const { status } = await this.http.patch('v1/settings/stealth-monitoring',
-            { userId: externalUserId, enableStealthMonitoring: s.enableStealthMonitoring },
+            { userId: externalUserId, stealthMonitoringSettings: { enableStealthMonitoring: s.enableStealthMonitoring } },
             { headers: this.auth(apiKey) });
         return status < 300;
     }
