@@ -48,6 +48,109 @@ export class ClientDashboardService {
         };
     }
 
+    /**
+     * Wellbeing signals over a trailing window (default 7 days). Flags each employee by their
+     * highest-severity signal. Signals: Overwork (sustained long hours vs. expected), acute Long
+     * day (today), and Low engagement (persistent low productivity / high idle). Thresholds are
+     * relative to each employee's expected work hours (fallback: org default, then 8h).
+     */
+    async getWellbeingSignals(orgId: string, days = 7, teamId?: string) {
+        const todayKey = toDateOnly(new Date());
+        const windowStart = new Date(todayKey.getTime() - (days - 1) * 86400000);
+        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+
+        const [employees, orgDefault, expectedSettings, summaries] = await Promise.all([
+            this.db.employee.findMany({ where: empWhere, select: { id: true, name: true } }),
+            this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
+            this.db.expectedWorkHoursSetting.findMany({ where: { orgId } }),
+            this.db.dailySummary.findMany({
+                where: { orgId, summaryDate: { gte: windowStart, lte: todayKey }, ...(teamId ? { teamId } : {}) },
+            }),
+        ]);
+
+        const expectedByEmp = new Map(expectedSettings.map(s => [s.employeeId, Number(s.expectedWorkHoursPerDay)]));
+        const orgExpected = orgDefault ? Number(orgDefault.defaultWorkHoursPerDay) : 8;
+
+        const byEmp = new Map<string, typeof summaries>();
+        for (const s of summaries) {
+            const g = byEmp.get(s.employeeId) ?? [];
+            g.push(s);
+            byEmp.set(s.employeeId, g);
+        }
+
+        const fmtH = (sec: number) => `${Math.round(sec / 360) / 10}h`;
+
+        return employees.map(emp => {
+            const rows = (byEmp.get(emp.id) ?? []).filter(r => r.isPresent);
+            const expectedH = expectedByEmp.get(emp.id) ?? orgExpected;
+            const expectedSec = expectedH * 3600;
+            const overSec = expectedSec + 2 * 3600; // expected + 2h = overwork line
+
+            const presentDays = rows.length;
+            const totalWork = rows.reduce((s, r) => s + (r.totalWorkSeconds ?? 0), 0);
+            const avgDailyWork = presentDays > 0 ? totalWork / presentDays : 0;
+            const daysOver = rows.filter(r => (r.totalWorkSeconds ?? 0) >= overSec).length;
+
+            const todayRow = rows.find(r => r.summaryDate.getTime() === todayKey.getTime());
+            const todayWork = todayRow?.totalWorkSeconds ?? 0;
+
+            // Engagement is judged only on days with real work (>= 1h), to avoid noise
+            const workingDays = rows.filter(r => (r.totalWorkSeconds ?? 0) >= 3600);
+            const scored = workingDays.filter(r => r.productivityScore != null);
+            const avgScore = scored.length > 0
+                ? scored.reduce((s, r) => s + Number(r.productivityScore!), 0) / scored.length : null;
+            const idleSum = workingDays.reduce((s, r) => s + (r.idleSeconds ?? 0), 0);
+            const workSum = workingDays.reduce((s, r) => s + (r.totalWorkSeconds ?? 0), 0);
+            const idleRatio = workSum > 0 ? idleSum / workSum : 0;
+
+            let severity: 'high' | 'medium' | null = null;
+            let signal: 'overwork' | 'longday' | 'engagement' | null = null;
+            let reason = '';
+
+            // 1. Overwork — takes precedence (sustained long hours vs. expected)
+            if (presentDays > 0 && (avgDailyWork >= overSec || daysOver >= 3)) {
+                severity = 'high'; signal = 'overwork';
+                reason = daysOver >= 3
+                    ? `${daysOver} long days (>${Math.round(expectedH + 2)}h) this week`
+                    : `Avg ${fmtH(avgDailyWork)}/day vs ${expectedH}h expected`;
+            } else if (presentDays > 0 && (avgDailyWork >= expectedSec + 3600 || daysOver >= 2)) {
+                severity = 'medium'; signal = 'overwork';
+                reason = `Avg ${fmtH(avgDailyWork)}/day vs ${expectedH}h expected`;
+            }
+
+            // 2. Acute long day today (only if not already flagged)
+            if (!severity && todayWork >= overSec) {
+                severity = 'medium'; signal = 'longday';
+                reason = `${fmtH(todayWork)} today vs ${expectedH}h expected`;
+            }
+
+            // 3. Low engagement — persistent low productivity or high idle
+            if (!severity && scored.length >= 3 && avgScore != null && avgScore < 30) {
+                severity = 'medium'; signal = 'engagement';
+                reason = `${Math.round(avgScore)}% avg productivity over ${scored.length} days`;
+            } else if (!severity && workingDays.length >= 3 && idleRatio > 0.5) {
+                severity = 'medium'; signal = 'engagement';
+                reason = `${Math.round(idleRatio * 100)}% idle time this week`;
+            }
+
+            const summaryLine = presentDays > 0
+                ? `Avg ${fmtH(avgDailyWork)}/day${avgScore != null ? ` · ${Math.round(avgScore)}%` : ''}`
+                : 'No activity this week';
+
+            return {
+                employeeId: emp.id,
+                name: emp.name,
+                severity,
+                signal,
+                reason: reason || summaryLine,
+                avgDailyHours: Math.round(avgDailyWork / 360) / 10,
+                avgScore: avgScore != null ? Math.round(avgScore) : null,
+                presentDays,
+                expectedHours: expectedH,
+            };
+        });
+    }
+
     async getTopProductive(orgId: string, date: Date, limit = 5, teamId?: string) {
         const summaries = await this.db.dailySummary.findMany({
             where: { orgId, summaryDate: toDateOnly(date), ...(teamId ? { teamId } : {}) },

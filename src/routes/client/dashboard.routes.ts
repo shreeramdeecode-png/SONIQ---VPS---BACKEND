@@ -72,6 +72,11 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
         return svc.getWorkModeSummary(req.orgId, q['teamId']);
     });
 
+    app.get('/api/client/dashboard/wellbeing', { preHandler: [auth] }, async (req) => {
+        const q = req.query as Record<string, string>;
+        return svc.getWellbeingSignals(req.orgId, Number(q['days'] ?? 7), q['teamId']);
+    });
+
     app.get('/api/client/dashboard/recent-screenshots', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
         return svc.getRecentScreenshots(req.orgId, Number(q['limit'] ?? 20), q['teamId']);
