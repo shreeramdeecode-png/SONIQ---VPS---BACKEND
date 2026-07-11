@@ -54,7 +54,14 @@ export class DailySummaryJob {
 
         if (events.length === 0) return;
 
-        const appEvents = events.filter(e => e.eventType === 'App');
+        // Trackpilots emits Locked/Idle as App events with sometimes huge durationSeconds
+        // (cumulative totals). They are NOT active work time and must be excluded from BOTH
+        // the productivity classification AND the work-time segments — otherwise a single
+        // "Locked" event balloons neutralSeconds to many hours (e.g. Deepan's phantom 7.2h).
+        const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
+        const isSystemApp = (e: { appName: string | null }) => !!(e.appName && SYSTEM_APP_BLOCKLIST.has(e.appName));
+
+        const appEvents = events.filter(e => e.eventType === 'App' && !isSystemApp(e));
         let productive = appEvents
             .filter(e => e.productivityStatus === 'Productive')
             .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
@@ -70,13 +77,9 @@ export class DailySummaryJob {
         // Trackpilots is restarted hours after the last real event.
         const GAP_THRESHOLD_MS = 15 * 60 * 1000; // gaps < 15 min are continuous work
 
-        // Trackpilots emits Locked/Idle as App events with sometimes huge durationSeconds
-        // (cumulative totals). Exclude them — they are not active work time.
-        const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
-
         const rawSegments: { start: number; end: number }[] = [];
         for (const e of events) {
-            if (e.eventType === 'App' && e.appName && SYSTEM_APP_BLOCKLIST.has(e.appName)) continue;
+            if (e.eventType === 'App' && isSystemApp(e)) continue;
 
             const start = (e.startTime ?? e.receivedAt).getTime();
             let end: number;

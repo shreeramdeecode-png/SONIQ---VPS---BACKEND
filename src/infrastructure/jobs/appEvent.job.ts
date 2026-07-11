@@ -3,6 +3,10 @@ import type { Server } from 'socket.io';
 import type { WebhookJobData } from '../../routes/webhook.routes.js';
 import { broadcastEmployeeActive } from '../../hubs/liveStatus.hub.js';
 
+// System states Trackpilots emits as App events — never counted as real productive/neutral work.
+// Keep in sync with dailySummary.job.ts and clientDashboard.service.ts.
+const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
+
 export class AppEventJob {
     constructor(
         private readonly db: PrismaClient,
@@ -51,6 +55,12 @@ export class AppEventJob {
 
         const productivity = await this.resolveProductivity(mapping.orgId, appName, appDomain, payloadStatus);
 
+        // Locked/Idle etc. are system states, not real app usage — they must not add to the
+        // productive/neutral/unproductive seconds (the 5-min cron excludes them too). Without this,
+        // a single "Locked" event with a large durationSeconds inflates neutralSeconds for hours.
+        const isSystemApp = !!(appName && SYSTEM_APP_BLOCKLIST.has(appName));
+        const classifiedDuration = isSystemApp ? 0 : (durationSeconds ?? 0);
+
         await this.db.activityEvent.create({
             data: {
                 id: crypto.randomUUID(),
@@ -85,7 +95,7 @@ export class AppEventJob {
 
         await this.upsertDailySummary(
             mapping.orgId, mapping.employeeId, mapping.employee.teamId,
-            bucketTime, productivity, durationSeconds ?? 0,
+            bucketTime, productivity, classifiedDuration,
         );
 
         await markLog(this.db, data.webhookLogId, 'Processed');

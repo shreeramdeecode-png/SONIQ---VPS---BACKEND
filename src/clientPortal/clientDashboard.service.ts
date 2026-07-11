@@ -20,7 +20,21 @@ export class ClientDashboardService {
             : 0;
         const totalWorkSeconds = summaries.reduce((sum, s) => sum + (s.totalWorkSeconds ?? 0), 0);
 
-        return { date: today, totalEmployees, activeNow, avgProductivityScore: avgScore, totalWorkSeconds, presentToday };
+        // Org-wide productivity breakdown (drives the Org Productivity Score legend bars)
+        const totalProductiveSeconds = summaries.reduce((sum, s) => sum + (s.productiveSeconds ?? 0), 0);
+        const totalNeutralSeconds = summaries.reduce((sum, s) => sum + (s.neutralSeconds ?? 0), 0);
+        const totalUnproductiveSeconds = summaries.reduce((sum, s) => sum + (s.unproductiveSeconds ?? 0), 0);
+        const totalIdleSeconds = summaries.reduce((sum, s) => sum + (s.idleSeconds ?? 0), 0);
+
+        // Average work time per present employee (drives Org Health "Avg work time / day")
+        const avgWorkSecondsPerDay = presentToday > 0 ? Math.round(totalWorkSeconds / presentToday) : 0;
+
+        return {
+            date: today, totalEmployees, activeNow, avgProductivityScore: avgScore,
+            totalWorkSeconds, presentToday,
+            totalProductiveSeconds, totalNeutralSeconds, totalUnproductiveSeconds, totalIdleSeconds,
+            avgWorkSecondsPerDay,
+        };
     }
 
     async getTopProductive(orgId: string, date: Date, limit = 5, teamId?: string) {
