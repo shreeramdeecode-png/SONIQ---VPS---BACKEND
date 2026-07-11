@@ -120,12 +120,13 @@ export class TrackpilotsService {
         // (SONIQ stores it capitalized: "Office"/"Remote"/"Hybrid").
         const wm = data.workMode?.toLowerCase();
         const workMode = wm && ['remote', 'office', 'hybrid'].includes(wm) ? wm : undefined;
-        const { data: res } = await this.http.patch('v1/employees',
-            {
-                userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId,
-                ...(workMode ? { workMode } : {}),
-            },
-            { headers: this.auth(apiKey) });
+        const body = {
+            userId: externalUserId, userName: data.name, teams: data.teamIds, roleId: data.roleId,
+            ...(workMode ? { workMode } : {}),
+        };
+        // TEMP DIAGNOSTIC — reveal the exact workMode value and full body being sent
+        console.log(`[TP-SYNC] updateEmployee raw workMode=${JSON.stringify(data.workMode)} normalized=${JSON.stringify(workMode)} | body=${JSON.stringify(body)}`);
+        const { data: res } = await this.http.patch('v1/employees', body, { headers: this.auth(apiKey) });
         return { id: res.response.userId, email: '', name: res.response.userName };
     }
 
