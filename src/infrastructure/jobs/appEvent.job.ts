@@ -47,8 +47,13 @@ export class AppEventJob {
         const appDomain: string | null = app.domain ?? null;
         const appFullUrl: string | null = app.fullUrl ?? null;
         const durationSeconds: number | null = time.durationInSeconds ?? null;
-        const startTime = time.startDate ? new Date(time.startDate) : null;
-        const endTime = time.endDate ? new Date(time.endDate) : null;
+        // Trackpilots sends the real activity times as time.startTime / time.endTime (ISO strings).
+        // (Older/other payloads used startDate/endDate — keep as a fallback.) Without this we lose
+        // the true timestamps and fall back to receivedAt (delivery time), skewing check-in & totals.
+        const startRaw = time.startTime ?? time.startDate;
+        const endRaw = time.endTime ?? time.endDate;
+        const startTime = startRaw ? new Date(startRaw) : null;
+        const endTime = endRaw ? new Date(endRaw) : null;
         const os: string | null = tracking.operatingSystem ?? null;
         const payloadStatus: string | null = app.productivityStatus ?? null;
         const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
