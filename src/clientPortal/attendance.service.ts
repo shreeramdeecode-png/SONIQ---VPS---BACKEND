@@ -25,7 +25,7 @@ export class AttendanceService {
         const [employees, summaryMap] = await Promise.all([
             this.db.employee.findMany({
                 where: employeesWhere,
-                select: { id: true, name: true, team: { select: { name: true } } },
+                select: { id: true, name: true, team: { select: { name: true } }, isCurrentlyWorking: true, lastSeenAt: true },
             }),
             this.db.dailySummary.findMany({
                 where: { orgId, summaryDate },
@@ -38,6 +38,9 @@ export class AttendanceService {
                 employeeId: emp.id,
                 name: emp.name,
                 teamName: emp.team?.name ?? null,
+                // Needed by the frontend isLiveActive() to show "Active" instead of a checkout time
+                isCurrentlyWorking: emp.isCurrentlyWorking,
+                lastSeenAt: emp.lastSeenAt,
                 isPresent: s?.isPresent ?? false,
                 firstCheckin: s?.firstCheckin ?? null,
                 lastCheckout: s?.lastCheckout ?? null,
