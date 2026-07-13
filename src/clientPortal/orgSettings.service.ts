@@ -16,6 +16,15 @@ function normaliseSettings(s: Record<string, unknown>): Record<string, unknown> 
     return { ...s, defaultExpectedInTime: formatTimeField(s['defaultExpectedInTime']) };
 }
 
+// The DB column is a Postgres TIME (Prisma DateTime) — a bare "HH:MM[:SS]" string is rejected.
+// Convert incoming time strings to a Date whose UTC h/m match (formatTimeField reads them via getUTC*).
+function parseTimeInput(val: unknown): Date | undefined {
+    if (val instanceof Date) return val;
+    if (typeof val !== 'string' || !val.includes(':')) return undefined;
+    const [h, m] = val.split(':');
+    return new Date(Date.UTC(1970, 0, 1, Number(h) || 0, Number(m) || 0, 0));
+}
+
 export class OrgSettingsService {
     constructor(
         private readonly db: PrismaClient,
@@ -31,9 +40,17 @@ export class OrgSettingsService {
     async updateSettings(orgId: string, actorId: string, req: Record<string, unknown>) {
         const existing = await this.db.orgDefaultSetting.findFirst({ where: { orgId } });
 
+        // Coerce the time string ("09:00:00") into a Date for the Postgres TIME column
+        const data: Record<string, unknown> = { ...req };
+        if ('defaultExpectedInTime' in data) {
+            const parsed = parseTimeInput(data['defaultExpectedInTime']);
+            if (parsed) data['defaultExpectedInTime'] = parsed;
+            else delete data['defaultExpectedInTime'];
+        }
+
         const s = existing
-            ? await this.db.orgDefaultSetting.update({ where: { id: existing.id }, data: { ...req, updatedAt: new Date() } })
-            : await this.db.orgDefaultSetting.create({ data: { id: randomUUID(), orgId, updatedAt: new Date(), ...(req as any) } });
+            ? await this.db.orgDefaultSetting.update({ where: { id: existing.id }, data: { ...data, updatedAt: new Date() } })
+            : await this.db.orgDefaultSetting.create({ data: { id: randomUUID(), orgId, updatedAt: new Date(), ...(data as any) } });
 
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'org.settings_updated', orgId });
 
