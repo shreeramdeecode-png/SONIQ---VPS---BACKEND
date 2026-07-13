@@ -51,7 +51,7 @@ export class ReportsService {
 
         const events = await this.db.activityEvent.findMany({
             where,
-            select: { appName: true, appDomain: true, appCategory: true, productivityStatus: true, durationSeconds: true },
+            select: { appName: true, appType: true, appDomain: true, appCategory: true, productivityStatus: true, durationSeconds: true },
         });
 
         const groups = new Map<string, { totalDuration: number; count: number; meta: typeof events[0] }>();
@@ -66,6 +66,7 @@ export class ReportsService {
         return Array.from(groups.values())
             .map(({ totalDuration, count, meta }) => ({
                 appName: meta.appName,
+                appType: meta.appType, // 'Application' | 'Website' — lets the UI split apps vs sites correctly
                 appDomain: meta.appDomain,
                 appCategory: meta.appCategory,
                 productivityStatus: meta.productivityStatus ?? 'Neutral',
