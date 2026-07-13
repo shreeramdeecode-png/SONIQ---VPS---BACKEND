@@ -109,7 +109,10 @@ export class DailySummaryJob {
             }
         }
 
-        const totalWork = merged.reduce((sum, s) => sum + Math.floor((s.end - s.start) / 1000), 0);
+        // Total worked = sum of actual tracked event durations (matches Trackpilots' methodology),
+        // NOT the gap-merged span — gap-filling inflated the total vs Trackpilots.
+        // The merged segments above are still used for firstCheckin / lastCheckout below.
+        const totalWork = appEvents.reduce((sum, e) => sum + (e.durationSeconds ?? 0), 0);
 
         const clockInTimes = events
             .filter(e => {
