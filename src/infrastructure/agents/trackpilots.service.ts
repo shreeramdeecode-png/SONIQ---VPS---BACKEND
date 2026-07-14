@@ -105,10 +105,14 @@ export class TrackpilotsService {
         return { id: data.response.userId, email: data.response.emailId, name: data.response.userName };
     }
 
-    async inviteEmployee(orgId: string, email: string, name: string, roleId: string, teamIds: string[]): Promise<boolean> {
+    async inviteEmployee(orgId: string, email: string, name: string, roleId: string, teamIds: string[], workMode = 'office'): Promise<boolean> {
         const apiKey = await this.getApiKey(orgId);
+        // Per Trackpilots docs, send-invite-link REQUIRES workMode (enum remote|office|hybrid).
+        // Omitting it returns 400 "Request body is not valid". Normalise + default to 'office'.
+        const wm = workMode?.toLowerCase();
+        const validWm = wm && ['remote', 'office', 'hybrid'].includes(wm) ? wm : 'office';
         const { status } = await this.http.post('v1/employees/send-invite-link',
-            { emailId: email, userName: name, roleId, teamId: teamIds },
+            { emailId: email, userName: name, roleId, teamId: teamIds, workMode: validWm },
             { headers: this.auth(apiKey) });
         return status < 300;
     }

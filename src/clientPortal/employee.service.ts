@@ -104,7 +104,8 @@ export class EmployeeService {
         await this.audit.log({ actorId, actorType: 'ClientAdmin', action: 'employee.invited',
             orgId, targetType: 'Employee', targetId: employee.id, after: employee.email });
 
-        // Best-effort: send invite via Trackpilots
+        // Best-effort: send invite via Trackpilots. Logs the outcome so invite failures are visible
+        // (Trackpilots returns 400=bad body, 409=email already exists, 422=bad role/team). Grep "[TP-INVITE]".
         try {
             const roles = await this.trackpilots.fetchAccessRoles(orgId);
             const tpRoleId = roles.find(r => r.name.toLowerCase() === 'employee')?.id ?? roles[0]?.id ?? '';
@@ -115,8 +116,16 @@ export class EmployeeService {
                 });
                 if (tm) teamIds.push(tm.externalTeamId);
             }
-            await this.trackpilots.inviteEmployee(orgId, req.email.toLowerCase(), req.name, tpRoleId, teamIds);
-        } catch { /* Trackpilots invite is non-fatal */ }
+            if (teamIds.length === 0) {
+                console.warn(`[TP-INVITE] no Trackpilots team mapping for ${req.email} — invite needs >=1 team (will 400)`);
+            }
+            await this.trackpilots.inviteEmployee(orgId, req.email.toLowerCase(), req.name, tpRoleId, teamIds, req.workMode);
+            console.log(`[TP-INVITE] OK — invite sent for ${req.email}`);
+        } catch (err: any) {
+            const status = err?.response?.status ?? '';
+            const body = err?.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : '';
+            console.error(`[TP-INVITE] FAILED for ${req.email}: ${status} ${err?.message ?? err} ${body}`);
+        }
 
         const settings = await this.buildSettings(orgId, employee.id);
         return { ...employee, teamName: employee.team?.name, roleName: employee.role.name, settings };
