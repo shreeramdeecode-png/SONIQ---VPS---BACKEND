@@ -24,90 +24,95 @@ export class AppEventJob {
             return;
         }
 
-        // Idempotency
-        if (data.externalTrackingId) {
-            const exists = await this.db.activityEvent.findFirst({
-                where: { externalTrackingId: data.externalTrackingId },
-            });
-            if (exists) {
-                await markLog(this.db, data.webhookLogId, 'Processed');
-                return;
-            }
+        const payload = JSON.parse(data.rawJson);
+        // Trackpilots BATCHES multiple activity events into one webhook's `data` array
+        // (up to ~12 per webhook). We must process EVERY item — reading only data[0] dropped
+        // ~2/3 of all activity. Each item gets a unique externalTrackingId (base::index).
+        const items: any[] = Array.isArray(payload.data) ? payload.data : (payload.data ? [payload.data] : []);
+        const baseId = data.externalTrackingId ?? data.webhookLogId;
+
+        // Idempotency — if the first item of this batch is already stored, the batch was processed
+        const already = await this.db.activityEvent.findFirst({ where: { externalTrackingId: `${baseId}::0` } });
+        if (already) {
+            await markLog(this.db, data.webhookLogId, 'Processed');
+            return;
         }
 
-        const payload = JSON.parse(data.rawJson);
-        const item = Array.isArray(payload.data) ? payload.data[0] : payload.data;
-        const tracking = item?.tracking ?? {};
-        const app = tracking.app ?? {};
-        const time = tracking.time ?? {};
+        let latestActivity: Date | null = null;
+        let latestOs: string | null = null;
+        let latestApp: string | null = null;
+        const receivedAt = new Date(data.occurredAt);
 
-        const appName: string | null = app.name ?? null;
-        const appTypeRaw: string | null = app.type ?? null;
-        const appCategory: string | null = app.category ?? null;
-        const appDomain: string | null = app.domain ?? null;
-        const appFullUrl: string | null = app.fullUrl ?? null;
-        const durationSeconds: number | null = time.durationInSeconds ?? null;
-        // Trackpilots sends the real activity times as time.startTime / time.endTime (ISO strings).
-        // (Older/other payloads used startDate/endDate — keep as a fallback.) Without this we lose
-        // the true timestamps and fall back to receivedAt (delivery time), skewing check-in & totals.
-        const startRaw = time.startTime ?? time.startDate;
-        const endRaw = time.endTime ?? time.endDate;
-        const startTime = startRaw ? new Date(startRaw) : null;
-        const endTime = endRaw ? new Date(endRaw) : null;
-        const os: string | null = tracking.operatingSystem ?? null;
-        const payloadStatus: string | null = app.productivityStatus ?? null;
-        const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
+        for (let i = 0; i < items.length; i++) {
+            const tracking = items[i]?.tracking ?? {};
+            const app = tracking.app ?? {};
+            const time = tracking.time ?? {};
 
-        const productivity = await this.resolveProductivity(mapping.orgId, appName, appDomain, payloadStatus);
+            const appName: string | null = app.name ?? null;
+            const appTypeRaw: string | null = app.type ?? null;
+            const appCategory: string | null = app.category ?? null;
+            const appDomain: string | null = app.domain ?? null;
+            const appFullUrl: string | null = app.fullUrl ?? null;
+            const durationSeconds: number | null = time.durationInSeconds ?? null;
+            // Real activity times from time.startTime/endTime (fallback startDate/endDate).
+            const startRaw = time.startTime ?? time.startDate;
+            const endRaw = time.endTime ?? time.endDate;
+            const startTime = startRaw ? new Date(startRaw) : null;
+            const endTime = endRaw ? new Date(endRaw) : null;
+            const os: string | null = tracking.operatingSystem ?? null;
+            const payloadStatus: string | null = app.productivityStatus ?? null;
+            const appType = appTypeRaw?.toLowerCase() === 'website' ? 'Website' : 'Application';
 
-        // Locked/Idle etc. are system states, not real app usage — they must not add to the
-        // productive/neutral/unproductive seconds (the 5-min cron excludes them too). Without this,
-        // a single "Locked" event with a large durationSeconds inflates neutralSeconds for hours.
-        const isSystemApp = !!(appName && SYSTEM_APP_BLOCKLIST.has(appName));
-        const classifiedDuration = isSystemApp ? 0 : (durationSeconds ?? 0);
+            const productivity = await this.resolveProductivity(mapping.orgId, appName, appDomain, payloadStatus);
+            // Locked/Idle are system states — excluded from productive/neutral/unproductive seconds.
+            const isSystemApp = !!(appName && SYSTEM_APP_BLOCKLIST.has(appName));
+            const classifiedDuration = isSystemApp ? 0 : (durationSeconds ?? 0);
 
-        await this.db.activityEvent.create({
-            data: {
-                id: crypto.randomUUID(),
-                orgId: mapping.orgId,
-                teamId: mapping.employee.teamId,
-                employeeId: mapping.employeeId,
-                eventType: 'App',
-                appName, appType, appCategory, appDomain, appFullUrl,
-                productivityStatus: productivity,
-                durationSeconds, startTime, endTime,
-                operatingSystem: os,
-                externalTrackingId: data.externalTrackingId,
-                rawPayload: payload,
-                receivedAt: new Date(data.occurredAt),
-            },
-        });
+            await this.db.activityEvent.create({
+                data: {
+                    id: crypto.randomUUID(),
+                    orgId: mapping.orgId,
+                    teamId: mapping.employee.teamId,
+                    employeeId: mapping.employeeId,
+                    eventType: 'App',
+                    appName, appType, appCategory, appDomain, appFullUrl,
+                    productivityStatus: productivity,
+                    durationSeconds, startTime, endTime,
+                    operatingSystem: os,
+                    externalTrackingId: `${baseId}::${i}`,
+                    // Store just this item (wrapped) so per-event rawPayload.data[0] stays consistent
+                    rawPayload: { ...payload, data: [items[i]] },
+                    receivedAt,
+                },
+            });
 
-        // Prefer actual activity timestamps; fall back to webhook delivery time only when
-        // Trackpilots sends no startDate/endDate (common for older agent versions).
-        const activityTime = endTime ?? startTime ?? new Date(data.occurredAt);
-        const bucketTime = startTime ?? new Date(data.occurredAt);
+            const bucketTime = startTime ?? receivedAt;
+            await this.upsertDailySummary(
+                mapping.orgId, mapping.employeeId, mapping.employee.teamId,
+                bucketTime, productivity, classifiedDuration,
+            );
 
+            const activityTime = endTime ?? startTime ?? receivedAt;
+            if (!latestActivity || activityTime > latestActivity) { latestActivity = activityTime; latestApp = appName; }
+            if (os) latestOs = os;
+        }
+
+        // Update live status once, from the most recent event in the batch
         await this.db.employee.update({
             where: { id: mapping.employeeId },
             data: {
                 isCurrentlyWorking: true,
-                lastSeenAt: activityTime,
-                ...(os ? { operatingSystem: os } : {}),
+                lastSeenAt: latestActivity ?? receivedAt,
+                ...(latestOs ? { operatingSystem: latestOs } : {}),
                 updatedAt: new Date(),
             },
         });
-
-        await this.upsertDailySummary(
-            mapping.orgId, mapping.employeeId, mapping.employee.teamId,
-            bucketTime, productivity, classifiedDuration,
-        );
 
         await markLog(this.db, data.webhookLogId, 'Processed');
 
         broadcastEmployeeActive(this.io, mapping.orgId, {
             employeeId: mapping.employeeId,
-            status: appName ?? 'Unknown',
+            status: latestApp ?? 'Unknown',
             timestamp: data.occurredAt,
         });
     }
