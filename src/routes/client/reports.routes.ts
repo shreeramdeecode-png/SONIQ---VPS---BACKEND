@@ -25,6 +25,13 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getAppUsage(req.orgId, from, to, q['employeeId']);
     });
 
+    app.get('/api/client/reports/hourly-heatmap', { preHandler: [auth] }, async (req) => {
+        const q = req.query as Record<string, string>;
+        const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
+        const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
+        return svc.getHourlyHeatmap(req.orgId, istDayStart(fromStr), istDayEnd(toStr), q['employeeId']);
+    });
+
     app.get('/api/client/reports/effort', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
