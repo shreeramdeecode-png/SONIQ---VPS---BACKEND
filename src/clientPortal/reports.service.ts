@@ -76,10 +76,9 @@ export class ReportsService {
             .sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds);
     }
 
-    // Hourly productivity heatmap: buckets App events by IST calendar DATE (one row
-    // per real day, no weekday merging) × IST hour (8AM–7PM) → { productive, total }
-    // seconds. Keyed by 'YYYY-MM-DD'. The frontend renders productive/total as each
-    // cell's productivity % and labels each row with its actual date.
+    // Hourly productivity heatmap: buckets App events by IST day-of-week (Mon–Fri)
+    // and IST hour (8AM–7PM) → { productive, total } seconds. The frontend renders
+    // productive/total as each cell's productivity %. Matches WorkPulseViz's grid.
     async getHourlyHeatmap(orgId: string, from: Date, to: Date, employeeId?: string) {
         const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
         const where = {
@@ -101,22 +100,22 @@ export class ReportsService {
         });
 
         const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-        // bucket['YYYY-MM-DD'][hour 8-19] = { productive, total } in seconds.
-        // One entry per real calendar date — no weekday merging.
-        const bucket: Record<string, Record<number, { productive: number; total: number }>> = {};
+        // bucket[dow 1-5][hour 8-19] = { productive, total } in seconds
+        const bucket: Record<number, Record<number, { productive: number; total: number }>> = {};
 
         for (const e of events) {
             const ts = e.startTime ?? e.receivedAt;
             if (!ts) continue;
             const ist = new Date(ts.getTime() + IST_OFFSET_MS); // shift to IST wall-clock
+            const dow = ist.getUTCDay();   // 0=Sun … 6=Sat (on the shifted time)
             const hour = ist.getUTCHours();
-            if (hour < 8 || hour > 19) continue;    // 8AM–7PM only (matches the grid columns)
-            const dateStr = ist.toISOString().slice(0, 10); // IST calendar date
+            if (dow < 1 || dow > 5) continue;    // Mon–Fri only
+            if (hour < 8 || hour > 19) continue; // 8AM–7PM only (matches the grid)
             const dur = e.durationSeconds ?? 0;
-            if (!bucket[dateStr]) bucket[dateStr] = {};
-            if (!bucket[dateStr][hour]) bucket[dateStr][hour] = { productive: 0, total: 0 };
-            bucket[dateStr][hour].total += dur;
-            if (e.productivityStatus === 'Productive') bucket[dateStr][hour].productive += dur;
+            if (!bucket[dow]) bucket[dow] = {};
+            if (!bucket[dow][hour]) bucket[dow][hour] = { productive: 0, total: 0 };
+            bucket[dow][hour].total += dur;
+            if (e.productivityStatus === 'Productive') bucket[dow][hour].productive += dur;
         }
 
         return bucket;
