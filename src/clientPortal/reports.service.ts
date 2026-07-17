@@ -122,6 +122,104 @@ export class ReportsService {
         return bucket;
     }
 
+    // Focus-session metrics reconstructed from the raw App-event timeline (per employee):
+    //  - deepSessionsPerDay: productive runs >= 30 min, averaged over active days
+    //  - longestStreakMin / avgStreakMin: length of continuous productive runs
+    //  - switchesPerHour: app/context switches per tracked hour
+    // A productive "run" is consecutive productive events with <= 5 min gaps; any
+    // non-productive event or a larger gap ends the run. System apps are excluded.
+    async getFocusMetrics(orgId: string, from: Date, to: Date, teamId?: string) {
+        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
+        const empWhere = { orgId, deletedAt: null, ...(teamId ? { teamId } : {}) };
+        const employees = await this.db.employee.findMany({ where: empWhere, select: { id: true } });
+        const empIds = employees.map(e => e.id);
+        if (empIds.length === 0) return [];
+
+        const events = await this.db.activityEvent.findMany({
+            where: {
+                orgId,
+                eventType: 'App' as const,
+                appName: { not: null },
+                durationSeconds: { not: null },
+                NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
+                employeeId: { in: empIds },
+                OR: [
+                    { startTime: { gte: from, lte: to } },
+                    { startTime: null, receivedAt: { gte: from, lte: to } },
+                ],
+            },
+            select: { employeeId: true, startTime: true, receivedAt: true, durationSeconds: true, productivityStatus: true, appName: true },
+        });
+
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const GAP_MS = 5 * 60 * 1000;   // <= 5 min gap keeps a productive run alive
+        const DEEP_S = 30 * 60;         // >= 30 min productive run = one deep session
+
+        const byEmp = new Map<string, typeof events>();
+        for (const e of events) {
+            if (!byEmp.has(e.employeeId)) byEmp.set(e.employeeId, []);
+            byEmp.get(e.employeeId)!.push(e);
+        }
+
+        const result: {
+            employeeId: string; deepSessionsPerDay: number; longestStreakMin: number;
+            avgStreakMin: number; switchesPerHour: number;
+        }[] = [];
+
+        for (const [employeeId, evs] of byEmp.entries()) {
+            const timeline = evs
+                .map(e => ({ ts: e.startTime ?? e.receivedAt, dur: e.durationSeconds ?? 0, prod: e.productivityStatus === 'Productive', app: e.appName }))
+                .filter((e): e is { ts: Date; dur: number; prod: boolean; app: string | null } => e.ts != null)
+                .sort((a, b) => a.ts.getTime() - b.ts.getTime());
+            if (timeline.length === 0) continue;
+
+            const runs: number[] = [];       // productive run durations (seconds)
+            let curRun = 0;
+            let curEnd: number | null = null; // end time (ms) of last productive event
+            let switches = 0;
+            let prevApp: string | null = null;
+            let totalTracked = 0;
+            const activeDates = new Set<string>();
+
+            for (const e of timeline) {
+                totalTracked += e.dur;
+                if (prevApp !== null && e.app !== prevApp) switches++;
+                prevApp = e.app;
+
+                const startMs = e.ts.getTime();
+                if (e.prod) {
+                    activeDates.add(new Date(startMs + IST_OFFSET_MS).toISOString().slice(0, 10));
+                    if (curEnd !== null && startMs - curEnd <= GAP_MS) {
+                        curRun += e.dur; // extend the current run
+                    } else {
+                        if (curRun > 0) runs.push(curRun);
+                        curRun = e.dur;  // start a new run
+                    }
+                    curEnd = startMs + e.dur * 1000;
+                } else if (curRun > 0) {
+                    runs.push(curRun);   // non-productive event breaks the run
+                    curRun = 0;
+                    curEnd = null;
+                }
+            }
+            if (curRun > 0) runs.push(curRun);
+
+            const activeDays = Math.max(1, activeDates.size);
+            const deepSessions = runs.filter(r => r >= DEEP_S).length;
+            const trackedHours = totalTracked / 3600;
+
+            result.push({
+                employeeId,
+                deepSessionsPerDay: Math.round((deepSessions / activeDays) * 10) / 10,
+                longestStreakMin: runs.length ? Math.round(Math.max(...runs) / 60) : 0,
+                avgStreakMin: runs.length ? Math.round((runs.reduce((s, r) => s + r, 0) / runs.length) / 60) : 0,
+                switchesPerHour: trackedHours > 0 ? Math.round(switches / trackedHours) : 0,
+            });
+        }
+
+        return result;
+    }
+
     async getEffortUtilization(orgId: string, from: Date, to: Date, teamId?: string) {
         const where = { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}) };
 
