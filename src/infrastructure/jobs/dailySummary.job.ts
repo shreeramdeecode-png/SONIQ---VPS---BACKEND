@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { isSystemApp as isSystemAppName } from '../../utils/systemApps.js';
 
 export class DailySummaryJob {
     constructor(private readonly db: PrismaClient) {}
@@ -58,8 +59,7 @@ export class DailySummaryJob {
         // (cumulative totals). They are NOT active work time and must be excluded from BOTH
         // the productivity classification AND the work-time segments — otherwise a single
         // "Locked" event balloons neutralSeconds to many hours (e.g. Deepan's phantom 7.2h).
-        const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
-        const isSystemApp = (e: { appName: string | null }) => !!(e.appName && SYSTEM_APP_BLOCKLIST.has(e.appName));
+        const isSystemApp = (e: { appName: string | null }) => isSystemAppName(e.appName);
 
         const appEvents = events.filter(e => e.eventType === 'App' && !isSystemApp(e));
         let productive = appEvents

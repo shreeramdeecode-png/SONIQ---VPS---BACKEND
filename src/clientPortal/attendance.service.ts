@@ -1,11 +1,9 @@
 import type { PrismaClient } from '@prisma/client';
 import { toCsv } from '../utils/csvExport.js';
+// System states Trackpilots emits as App events — not real activity, excluded from the timeline.
+import { isSystemApp } from '../utils/systemApps.js';
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-// System states Trackpilots emits as App events — not real activity, excluded from the timeline.
-// Keep in sync with dailySummary.job.ts, appEvent.job.ts and clientDashboard.service.ts.
-const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
 
 function toIstDay(d: Date): Date {
     const ist = new Date(d.getTime() + IST_OFFSET_MS);
@@ -121,7 +119,7 @@ export class AttendanceService {
             name: e.name,
             teamName: e.team?.name ?? null,
             segments: (byEmployee.get(e.id) ?? [])
-                .filter(ev => !(ev.appName && SYSTEM_APP_BLOCKLIST.has(ev.appName)))
+                .filter(ev => !isSystemApp(ev.appName))
                 .map(ev => {
                 const startTime = ev.startTime ?? ev.receivedAt;
                 // endTime is null for all Trackpilots events; derive from startTime + durationSeconds

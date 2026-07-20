@@ -2,10 +2,8 @@ import type { PrismaClient } from '@prisma/client';
 import type { Server } from 'socket.io';
 import type { WebhookJobData } from '../../routes/webhook.routes.js';
 import { broadcastEmployeeActive } from '../../hubs/liveStatus.hub.js';
-
 // System states Trackpilots emits as App events — never counted as real productive/neutral work.
-// Keep in sync with dailySummary.job.ts and clientDashboard.service.ts.
-const SYSTEM_APP_BLOCKLIST = new Set(['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR']);
+import { isSystemApp as isSystemAppName } from '../../utils/systemApps.js';
 
 export class AppEventJob {
     constructor(
@@ -65,7 +63,7 @@ export class AppEventJob {
 
             const productivity = await this.resolveProductivity(mapping.orgId, appName, appDomain, payloadStatus);
             // Locked/Idle are system states — excluded from productive/neutral/unproductive seconds.
-            const isSystemApp = !!(appName && SYSTEM_APP_BLOCKLIST.has(appName));
+            const isSystemApp = isSystemAppName(appName);
             const classifiedDuration = isSystemApp ? 0 : (durationSeconds ?? 0);
 
             await this.db.activityEvent.create({

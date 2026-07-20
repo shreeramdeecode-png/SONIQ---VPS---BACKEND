@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { toCsv } from '../utils/csvExport.js';
+import { excludeSystemAppsFilter } from '../utils/systemApps.js';
 
 export class ReportsService {
     constructor(private readonly db: PrismaClient) {}
@@ -37,13 +38,12 @@ export class ReportsService {
     }
 
     async getAppUsage(orgId: string, from: Date, to: Date, employeeId?: string) {
-        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
         const where = {
             orgId,
             eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
-            NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
+            ...excludeSystemAppsFilter,
             ...(employeeId ? { employeeId } : {}),
             OR: [
                 { startTime: { gte: from, lte: to } },
@@ -83,7 +83,6 @@ export class ReportsService {
     // groups the dates into weeks (Mon–Fri, weekends skipped) and renders one grid per
     // week, so no two dates are ever merged into a single weekday row.
     async getHourlyHeatmap(orgId: string, from: Date, to: Date, employeeId?: string, teamId?: string) {
-        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
         // teamId scopes to that team's employees (used by the dashboard Peak Hours card)
         const teamEmpIds = teamId
             ? await this.db.employee.findMany({ where: { orgId, teamId, deletedAt: null }, select: { id: true } })
@@ -94,7 +93,7 @@ export class ReportsService {
             eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
-            NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
+            ...excludeSystemAppsFilter,
             ...(employeeId ? { employeeId } : teamEmpIds ? { employeeId: { in: teamEmpIds } } : {}),
             OR: [
                 { startTime: { gte: from, lte: to } },
@@ -136,7 +135,6 @@ export class ReportsService {
     // A productive "run" is consecutive productive events with <= 5 min gaps; any
     // non-productive event or a larger gap ends the run. System apps are excluded.
     async getFocusMetrics(orgId: string, from: Date, to: Date, teamId?: string) {
-        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
         const empWhere = { orgId, deletedAt: null, ...(teamId ? { teamId } : {}) };
         const employees = await this.db.employee.findMany({ where: empWhere, select: { id: true } });
         const empIds = employees.map(e => e.id);
@@ -148,7 +146,7 @@ export class ReportsService {
                 eventType: 'App' as const,
                 appName: { not: null },
                 durationSeconds: { not: null },
-                NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
+                ...excludeSystemAppsFilter,
                 employeeId: { in: empIds },
                 OR: [
                     { startTime: { gte: from, lte: to } },

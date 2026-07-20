@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { excludeSystemAppsFilter } from '../utils/systemApps.js';
 
 export class ClientDashboardService {
     constructor(private readonly db: PrismaClient) {}
@@ -229,7 +230,6 @@ export class ClientDashboardService {
         const empFilter = empIds ? { employeeId: { in: empIds } } : {};
 
         // System states that Trackpilots emits as app events — exclude from all app charts
-        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
 
         // Native apps grouped by appName; websites grouped by domain for per-site breakdown
         const [appGroups, webGroups] = await Promise.all([
@@ -238,7 +238,7 @@ export class ClientDashboardService {
                 where: {
                     orgId, eventType: 'App' as const, appType: 'Application',
                     appName: { not: null },
-                    NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
+                    ...excludeSystemAppsFilter,
                     ...empFilter, ...timeFilter,
                 },
                 _sum: { durationSeconds: true },
