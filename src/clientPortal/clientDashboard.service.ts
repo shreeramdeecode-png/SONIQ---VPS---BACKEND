@@ -107,7 +107,7 @@ export class ClientDashboardService {
             const idleRatio = workSum > 0 ? idleSum / workSum : 0;
 
             let severity: 'high' | 'medium' | null = null;
-            let signal: 'overwork' | 'longday' | 'engagement' | null = null;
+            let signal: 'overwork' | 'longday' | 'underwork' | 'engagement' | null = null;
             let reason = '';
 
             // 1. Overwork — takes precedence (sustained long hours vs. expected)
@@ -125,6 +125,21 @@ export class ClientDashboardService {
             if (!severity && todayWork >= overSec) {
                 severity = 'medium'; signal = 'longday';
                 reason = `${fmtH(todayWork)} today vs ${expectedH}h expected`;
+            }
+
+            // 3. Under-utilisation — present, but working far below expected hours.
+            // The mirror of overwork. Without this an employee doing ~0h slips past
+            // every rule, because the engagement checks below only consider days with
+            // >= 1h of work and therefore never run for them.
+            if (!severity && presentDays >= 2) {
+                const ratio = expectedSec > 0 ? avgDailyWork / expectedSec : 1;
+                if (ratio < 0.25) {
+                    severity = 'high'; signal = 'underwork';
+                    reason = `Avg ${fmtH(avgDailyWork)}/day vs ${expectedH}h expected`;
+                } else if (ratio < 0.5) {
+                    severity = 'medium'; signal = 'underwork';
+                    reason = `Avg ${fmtH(avgDailyWork)}/day vs ${expectedH}h expected`;
+                }
             }
 
             // 3. Low engagement — persistent low productivity or high idle
