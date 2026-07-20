@@ -36,12 +36,17 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
 
     app.get('/api/client/dashboard/top-productive', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        return svc.getTopProductive(req.orgId, parseDate(q['date']), Number(q['limit'] ?? 5), q['teamId']);
+        // from/to scope the ranking; falls back to a single `date` (legacy) or today.
+        const from = parseDate(q['from'] ?? q['date']);
+        const to = parseDate(q['to'] ?? q['date']);
+        return svc.getTopProductive(req.orgId, from, to, Number(q['limit'] ?? 5), q['teamId']);
     });
 
     app.get('/api/client/dashboard/top-unproductive', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        return svc.getTopUnproductive(req.orgId, parseDate(q['date']), Number(q['limit'] ?? 5), q['teamId']);
+        const from = parseDate(q['from'] ?? q['date']);
+        const to = parseDate(q['to'] ?? q['date']);
+        return svc.getTopUnproductive(req.orgId, from, to, Number(q['limit'] ?? 5), q['teamId']);
     });
 
     app.get('/api/client/dashboard/top-apps', { preHandler: [auth] }, async (req, reply) => {
@@ -74,7 +79,10 @@ export async function clientDashboardRoutes(app: FastifyInstance, svc: ClientDas
 
     app.get('/api/client/dashboard/wellbeing', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
-        return svc.getWellbeingSignals(req.orgId, Number(q['days'] ?? 7), q['teamId']);
+        // from/to (date picker) scope the window; omitted → trailing `days` ending today.
+        const from = q['from'] ? parseDate(q['from']) : undefined;
+        const to = q['to'] ? parseDate(q['to']) : undefined;
+        return svc.getWellbeingSignals(req.orgId, Number(q['days'] ?? 7), q['teamId'], from, to);
     });
 
     app.get('/api/client/dashboard/recent-screenshots', { preHandler: [auth] }, async (req) => {

@@ -54,9 +54,12 @@ export class ClientDashboardService {
      * day (today), and Low engagement (persistent low productivity / high idle). Thresholds are
      * relative to each employee's expected work hours (fallback: org default, then 8h).
      */
-    async getWellbeingSignals(orgId: string, days = 7, teamId?: string) {
-        const todayKey = toDateOnly(new Date());
-        const windowStart = new Date(todayKey.getTime() - (days - 1) * 86400000);
+    async getWellbeingSignals(orgId: string, days = 7, teamId?: string, from?: Date, to?: Date) {
+        // Window: explicit from/to when supplied (dashboard date picker), otherwise a
+        // trailing `days` window ending today. The "acute long day" signal keys off the
+        // LAST day of the window, which is today for the default range.
+        const windowEnd = toDateOnly(to ?? new Date());
+        const windowStart = from ? toDateOnly(from) : new Date(windowEnd.getTime() - (days - 1) * 86400000);
         const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
 
         const [employees, orgDefault, expectedSettings, summaries] = await Promise.all([
@@ -64,7 +67,7 @@ export class ClientDashboardService {
             this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
             this.db.expectedWorkHoursSetting.findMany({ where: { orgId } }),
             this.db.dailySummary.findMany({
-                where: { orgId, summaryDate: { gte: windowStart, lte: todayKey }, ...(teamId ? { teamId } : {}) },
+                where: { orgId, summaryDate: { gte: windowStart, lte: windowEnd }, ...(teamId ? { teamId } : {}) },
             }),
         ]);
 
@@ -91,7 +94,7 @@ export class ClientDashboardService {
             const avgDailyWork = presentDays > 0 ? totalWork / presentDays : 0;
             const daysOver = rows.filter(r => (r.totalWorkSeconds ?? 0) >= overSec).length;
 
-            const todayRow = rows.find(r => r.summaryDate.getTime() === todayKey.getTime());
+            const todayRow = rows.find(r => r.summaryDate.getTime() === windowEnd.getTime());
             const todayWork = todayRow?.totalWorkSeconds ?? 0;
 
             // Engagement is judged only on days with real work (>= 1h), to avoid noise
@@ -153,42 +156,47 @@ export class ClientDashboardService {
         }).filter(r => r.presentDays > 0);
     }
 
-    async getTopProductive(orgId: string, date: Date, limit = 5, teamId?: string) {
+    // Ranks employees over a DATE RANGE (single day = pass the same date for from/to).
+    // Sums each employee's seconds across the range and averages their score, so the
+    // dashboard's date picker actually scopes the list.
+    private async rankEmployeesByField(
+        orgId: string, from: Date, to: Date, field: 'productiveSeconds' | 'unproductiveSeconds',
+        limit = 5, teamId?: string,
+    ) {
         const summaries = await this.db.dailySummary.findMany({
-            where: { orgId, summaryDate: toDateOnly(date), ...(teamId ? { teamId } : {}) },
-            orderBy: { productiveSeconds: 'desc' },
-            take: limit,
+            where: { orgId, summaryDate: { gte: toDateOnly(from), lte: toDateOnly(to) }, ...(teamId ? { teamId } : {}) },
         });
-        const empIds = summaries.map(s => s.employeeId);
+
+        const byEmp = new Map<string, { seconds: number; scoreSum: number; scoreCount: number }>();
+        for (const s of summaries) {
+            const g = byEmp.get(s.employeeId) ?? { seconds: 0, scoreSum: 0, scoreCount: 0 };
+            g.seconds += s[field] ?? 0;
+            if (s.productivityScore != null) { g.scoreSum += Number(s.productivityScore); g.scoreCount++; }
+            byEmp.set(s.employeeId, g);
+        }
+
+        const ranked = [...byEmp.entries()]
+            .sort((a, b) => b[1].seconds - a[1].seconds)
+            .slice(0, limit);
+
         const employees = await this.db.employee.findMany({
-            where: { id: { in: empIds } }, select: { id: true, name: true },
+            where: { id: { in: ranked.map(([id]) => id) } }, select: { id: true, name: true },
         }).then(rows => new Map(rows.map(r => [r.id, r.name])));
 
-        return summaries.map(s => ({
-            employeeId: s.employeeId,
-            name: employees.get(s.employeeId) ?? 'Unknown',
-            productiveSeconds: s.productiveSeconds,
-            productivityScore: s.productivityScore,
+        return ranked.map(([employeeId, g]) => ({
+            employeeId,
+            name: employees.get(employeeId) ?? 'Unknown',
+            [field]: g.seconds,
+            productivityScore: g.scoreCount > 0 ? Math.round(g.scoreSum / g.scoreCount) : null,
         }));
     }
 
-    async getTopUnproductive(orgId: string, date: Date, limit = 5, teamId?: string) {
-        const summaries = await this.db.dailySummary.findMany({
-            where: { orgId, summaryDate: toDateOnly(date), ...(teamId ? { teamId } : {}) },
-            orderBy: { unproductiveSeconds: 'desc' },
-            take: limit,
-        });
-        const empIds = summaries.map(s => s.employeeId);
-        const employees = await this.db.employee.findMany({
-            where: { id: { in: empIds } }, select: { id: true, name: true },
-        }).then(rows => new Map(rows.map(r => [r.id, r.name])));
+    async getTopProductive(orgId: string, from: Date, to: Date, limit = 5, teamId?: string) {
+        return this.rankEmployeesByField(orgId, from, to, 'productiveSeconds', limit, teamId);
+    }
 
-        return summaries.map(s => ({
-            employeeId: s.employeeId,
-            name: employees.get(s.employeeId) ?? 'Unknown',
-            unproductiveSeconds: s.unproductiveSeconds,
-            productivityScore: s.productivityScore,
-        }));
+    async getTopUnproductive(orgId: string, from: Date, to: Date, limit = 5, teamId?: string) {
+        return this.rankEmployeesByField(orgId, from, to, 'unproductiveSeconds', limit, teamId);
     }
 
     async getTopApps(orgId: string, from: Date, to: Date, limit = 10, teamId?: string) {

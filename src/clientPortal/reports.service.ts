@@ -37,11 +37,13 @@ export class ReportsService {
     }
 
     async getAppUsage(orgId: string, from: Date, to: Date, employeeId?: string) {
+        const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
         const where = {
             orgId,
             eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
+            NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
             ...(employeeId ? { employeeId } : {}),
             OR: [
                 { startTime: { gte: from, lte: to } },
@@ -80,15 +82,20 @@ export class ReportsService {
     // (8AM–7PM) → { productive, total } seconds, keyed by 'YYYY-MM-DD'. The frontend
     // groups the dates into weeks (Mon–Fri, weekends skipped) and renders one grid per
     // week, so no two dates are ever merged into a single weekday row.
-    async getHourlyHeatmap(orgId: string, from: Date, to: Date, employeeId?: string) {
+    async getHourlyHeatmap(orgId: string, from: Date, to: Date, employeeId?: string, teamId?: string) {
         const SYSTEM_APP_BLOCKLIST = ['Locked', 'Idle', 'Screen Lock', 'TrackPilots', 'Activity ITR'];
+        // teamId scopes to that team's employees (used by the dashboard Peak Hours card)
+        const teamEmpIds = teamId
+            ? await this.db.employee.findMany({ where: { orgId, teamId, deletedAt: null }, select: { id: true } })
+                .then(rows => rows.map(r => r.id))
+            : undefined;
         const where = {
             orgId,
             eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
             NOT: { appName: { in: SYSTEM_APP_BLOCKLIST } },
-            ...(employeeId ? { employeeId } : {}),
+            ...(employeeId ? { employeeId } : teamEmpIds ? { employeeId: { in: teamEmpIds } } : {}),
             OR: [
                 { startTime: { gte: from, lte: to } },
                 { startTime: null, receivedAt: { gte: from, lte: to } },

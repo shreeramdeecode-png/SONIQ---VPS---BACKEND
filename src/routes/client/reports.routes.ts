@@ -29,7 +29,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         const q = req.query as Record<string, string>;
         const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
         const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
-        return svc.getHourlyHeatmap(req.orgId, istDayStart(fromStr), istDayEnd(toStr), q['employeeId']);
+        return svc.getHourlyHeatmap(req.orgId, istDayStart(fromStr), istDayEnd(toStr), q['employeeId'], q['teamId']);
     });
 
     app.get('/api/client/reports/focus-sessions', { preHandler: [auth] }, async (req) => {
