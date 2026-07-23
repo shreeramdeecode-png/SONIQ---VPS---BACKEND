@@ -72,6 +72,13 @@ export class DailySummaryJob {
             .filter(e => e.productivityStatus === 'Neutral')
             .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
 
+        // Idle time is carried by Trackpilots' "Idle" app events, which are excluded from
+        // work above (blocklist). Their durations are per-event (verified, not cumulative),
+        // so a plain sum is correct. "Locked" stays out — that's "away", not "idle".
+        const idle = events
+            .filter(e => e.eventType === 'App' && (e.appName ?? '').toLowerCase() === 'idle')
+            .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
+
         // Build activity segments: use actual endTime or startTime+duration, never receivedAt as end.
         // receivedAt is webhook delivery time, not activity end — using it inflates totalWork when
         // Trackpilots is restarted hours after the last real event.
@@ -172,7 +179,7 @@ export class DailySummaryJob {
             productiveSeconds: productive,
             unproductiveSeconds: unproductive,
             neutralSeconds: neutral,
-            idleSeconds: Math.max(0, totalWork - productive - unproductive - neutral),
+            idleSeconds: idle,
             productivityScore: score,
             isPresent: true,
             isLate,
