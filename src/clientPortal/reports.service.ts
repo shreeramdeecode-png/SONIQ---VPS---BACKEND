@@ -273,10 +273,12 @@ export class ReportsService {
                 .then(rows => new Map(rows.map(r => [r.id, r]))),
         ]);
 
-        return summaries.map(s => {
+        const dayOf = (d: Date) => d.toISOString().slice(0, 10);
+
+        const presentRows = summaries.map(s => {
             const emp = employees.get(s.employeeId);
             return {
-                date: s.summaryDate.toISOString().slice(0, 10),
+                date: dayOf(s.summaryDate),
                 employeeId: s.employeeId,
                 name: emp?.name ?? 'Unknown',
                 designation: emp?.designation ?? null,
@@ -284,16 +286,56 @@ export class ReportsService {
                 team: emp?.team?.name ?? null,
                 isPresent: s.isPresent,
                 isLate: s.isLate,
-                firstCheckin: s.firstCheckin,
-                lastCheckout: s.lastCheckout,
+                firstCheckin: s.firstCheckin as Date | null,
+                lastCheckout: s.lastCheckout as Date | null,
                 totalWorkSeconds: s.totalWorkSeconds,
                 productiveSeconds: s.productiveSeconds,
                 unproductiveSeconds: s.unproductiveSeconds,
                 idleSeconds: s.idleSeconds,
-                productivityScore: s.productivityScore,
+                productivityScore: s.productivityScore as number | null,
                 screenshotsCount: s.screenshotsCount,
             };
         });
+
+        // dailySummary only ever holds PRESENT rows (one per day an employee had
+        // activity) — absent days have no record at all, so nothing ever counts as
+        // absent. Synthesise absences here: a "working day" is any day at least one
+        // person worked (auto-skips weekends/holidays), and only employees ACTIVE in
+        // the range are considered, so never-active accounts don't create phantom
+        // absences.
+        const workingDays = [...new Set(summaries.map(s => dayOf(s.summaryDate)))];
+        const activeEmpIds = [...new Set(summaries.map(s => s.employeeId).filter(id => employees.has(id)))];
+        const presentKeys = new Set(summaries.map(s => `${s.employeeId}|${dayOf(s.summaryDate)}`));
+
+        const absentRows: typeof presentRows = [];
+        for (const employeeId of activeEmpIds) {
+            const emp = employees.get(employeeId)!;
+            for (const date of workingDays) {
+                if (presentKeys.has(`${employeeId}|${date}`)) continue;
+                absentRows.push({
+                    date,
+                    employeeId,
+                    name: emp.name,
+                    designation: emp.designation ?? null,
+                    department: emp.department ?? null,
+                    team: emp.team?.name ?? null,
+                    isPresent: false,
+                    isLate: false,
+                    firstCheckin: null,
+                    lastCheckout: null,
+                    totalWorkSeconds: 0,
+                    productiveSeconds: 0,
+                    unproductiveSeconds: 0,
+                    idleSeconds: 0,
+                    productivityScore: null,
+                    screenshotsCount: 0,
+                });
+            }
+        }
+
+        return [...presentRows, ...absentRows].sort((a, b) =>
+            a.date === b.date ? a.name.localeCompare(b.name) : a.date.localeCompare(b.date),
+        );
     }
 
     async getTimesheetReport(orgId: string, from: Date, to: Date, employeeId?: string) {
