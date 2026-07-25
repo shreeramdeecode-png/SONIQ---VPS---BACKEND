@@ -129,6 +129,17 @@ export class DailySummaryJob {
             })
             .map(e => (e.startTime ?? e.receivedAt).getTime());
 
+        // A day with only system-state events (Locked/Idle) and no real work or
+        // clock-in is NOT a working day. Without this guard, firstCheckin fell back to
+        // Date.now() below — fabricating a 0s "present/Late" row with an identical fake
+        // check-in across every backfilled day (e.g. 12:17 PM everywhere). Drop any
+        // stale row so the day correctly reads as absent (no record).
+        const hasRealPresence = clockInTimes.length > 0 || merged.length > 0 || totalWork > 0;
+        if (!hasRealPresence) {
+            await this.db.dailySummary.deleteMany({ where: { orgId, employeeId, summaryDate: rangeStart } });
+            return;
+        }
+
         // firstCheckin: earliest clock-in (workMode event) or earliest segment start
         const firstCheckinMs = clockInTimes.length > 0
             ? Math.min(...clockInTimes)
