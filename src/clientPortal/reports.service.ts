@@ -299,11 +299,25 @@ export class ReportsService {
 
         // dailySummary only ever holds PRESENT rows (one per day an employee had
         // activity) — absent days have no record at all, so nothing ever counts as
-        // absent. Synthesise absences here: a "working day" is any day at least one
-        // person worked (auto-skips weekends/holidays), and only employees ACTIVE in
-        // the range are considered, so never-active accounts don't create phantom
-        // absences.
-        const workingDays = [...new Set(summaries.map(s => dayOf(s.summaryDate)))];
+        // absent. Synthesise absences here.
+        //
+        // Working day = every weekday (Mon–Fri) in the range up to today — a day
+        // NOBODY worked still counts, so an active employee missing it is absent
+        // (this matches the daily Attendance page). Only employees active in the
+        // range are considered, so never-active accounts (e.g. test users) don't
+        // generate phantom absences. NOTE: with no leave/holiday calendar, a genuine
+        // company holiday counts as an absence for everyone.
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const todayStr = new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
+        const workingDays: string[] = [];
+        for (let t = from.getTime(); t <= to.getTime(); t += 86400000) {
+            const d = new Date(t);
+            const dow = d.getUTCDay();
+            if (dow === 0 || dow === 6) continue; // skip weekends
+            const ds = dayOf(d);
+            if (ds > todayStr) continue;          // don't count future days
+            workingDays.push(ds);
+        }
         const activeEmpIds = [...new Set(summaries.map(s => s.employeeId).filter(id => employees.has(id)))];
         const presentKeys = new Set(summaries.map(s => `${s.employeeId}|${dayOf(s.summaryDate)}`));
 
