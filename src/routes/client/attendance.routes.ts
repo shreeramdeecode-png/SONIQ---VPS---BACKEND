@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AttendanceService } from '../../clientPortal/attendance.service.js';
+import { scopeForRequest } from '../../utils/roleScope.js';
 
 function parseDate(s: string | undefined): Date {
     if (!s) return new Date();
@@ -14,7 +15,8 @@ export async function clientAttendanceRoutes(app: FastifyInstance, svc: Attendan
     app.get('/api/client/attendance/daily', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
         const date = parseDate(q['date']);
-        return svc.getDailyAttendance(req.orgId, date, q['teamId']);
+        const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
+        return svc.getDailyAttendance(req.orgId, date, teamId, empIds);
     });
 
     app.get('/api/client/attendance/employees/:id', { preHandler: [auth] }, async (req, reply) => {
@@ -23,19 +25,24 @@ export async function clientAttendanceRoutes(app: FastifyInstance, svc: Attendan
         const from = parseDate(q['from']);
         const to = parseDate(q['to']);
         if (from > to) return reply.status(400).send({ error: 'from must be before to' });
+        // A scoped caller may only view an employee within their visible set.
+        const { empIds } = await scopeForRequest(app.prisma, req);
+        if (empIds && !empIds.includes(id)) return reply.status(403).send({ error: 'Forbidden' });
         return svc.getEmployeeAttendance(req.orgId, id, from, to);
     });
 
     app.get('/api/client/attendance/timeline', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
         const date = parseDate(q['date']);
-        return svc.getAttendanceTimeline(req.orgId, date, q['teamId'], q['employeeId']);
+        const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
+        return svc.getAttendanceTimeline(req.orgId, date, teamId, q['employeeId'], empIds);
     });
 
     app.get('/api/client/attendance/export', { preHandler: [auth] }, async (req, reply) => {
         const q = req.query as Record<string, string>;
         const date = parseDate(q['date']);
-        const csv = await svc.exportAttendanceCsv(req.orgId, date, q['teamId']);
+        const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
+        const csv = await svc.exportAttendanceCsv(req.orgId, date, teamId, empIds);
         const filename = `attendance-${date.toISOString().slice(0, 10)}.csv`;
         return reply
             .header('Content-Type', 'text/csv')

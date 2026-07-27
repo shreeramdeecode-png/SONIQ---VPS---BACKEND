@@ -19,6 +19,8 @@ export interface ClientTokenPayload {
     name: string;
     org_id: string;
     role: string;
+    scope: 'org' | 'team' | 'self';
+    team_id: string | null;
     jti: string;
 }
 
@@ -45,6 +47,8 @@ export class TokenService {
         email: string;
         name: string;
         roleName: string;
+        scope: 'org' | 'team' | 'self';
+        teamId: string | null;
     }): string {
         const payload: ClientTokenPayload = {
             sub: args.employeeId,
@@ -52,6 +56,8 @@ export class TokenService {
             name: args.name,
             org_id: args.orgId,
             role: args.roleName,
+            scope: args.scope,
+            team_id: args.teamId,
             jti: randomBytes(16).toString('hex'),
         };
         return jwt.sign(payload, this.clientSecret, { expiresIn: `${CLIENT_ACCESS_TOKEN_HOURS}h` });

@@ -26,12 +26,13 @@ export class EmployeeService {
     ) {}
 
     async listEmployees(orgId: string, opts: {
-        teamId?: string; search?: string; page?: number; pageSize?: number;
+        teamId?: string; search?: string; page?: number; pageSize?: number; empIds?: string[] | null;
     } = {}): Promise<PagedResult<unknown>> {
-        const { teamId, search, page = 1, pageSize = 20 } = opts;
+        const { teamId, search, page = 1, pageSize = 20, empIds } = opts;
         const where = {
             orgId, deletedAt: null,
             ...(teamId ? { teamId } : {}),
+            ...(empIds ? { id: { in: empIds } } : {}),
             ...(search ? { OR: [{ name: { contains: search } }, { email: { contains: search } }] } : {}),
         };
 

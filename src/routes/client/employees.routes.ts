@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { EmployeeService } from '../../clientPortal/employee.service.js';
 import type { PermissionGuard } from '../../middleware/permissions.js';
+import { scopeForRequest } from '../../utils/roleScope.js';
 
 export async function clientEmployeeRoutes(app: FastifyInstance, svc: EmployeeService, perm: PermissionGuard) {
     const auth = app.authenticate('client');
@@ -9,14 +10,17 @@ export async function clientEmployeeRoutes(app: FastifyInstance, svc: EmployeeSe
 
     app.get('/api/client/employees', { preHandler: [auth] }, async (req) => {
         const q = req.query as Record<string, string>;
+        const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
         return svc.listEmployees(req.orgId, {
-            teamId: q['teamId'], search: q['search'],
+            teamId, search: q['search'], empIds,
             page: Number(q['page'] ?? 1), pageSize: Number(q['pageSize'] ?? 20),
         });
     });
 
-    app.get('/api/client/employees/:id', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/employees/:id', { preHandler: [auth] }, async (req, reply) => {
         const { id } = req.params as { id: string };
+        const { empIds } = await scopeForRequest(app.prisma, req);
+        if (empIds && !empIds.includes(id)) return reply.status(403).send({ error: 'Forbidden' });
         return svc.getEmployee(req.orgId, id);
     });
 

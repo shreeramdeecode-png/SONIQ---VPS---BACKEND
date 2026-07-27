@@ -1,12 +1,20 @@
 import type { PrismaClient } from '@prisma/client';
 import { excludeSystemAppsFilter } from '../utils/systemApps.js';
 
+// Data-scope filters. `empIds` is the set of employees the caller may see:
+//   null      → org scope (Admin), no restriction
+//   string[]  → team scope (Manager, their team) or self scope (Employee, just them)
+// empIn() applies it to tables keyed by employeeId (dailySummary, screenshot, event);
+// idIn() applies it to the Employee table itself (keyed by id).
+const empIn = (empIds?: string[] | null) => (empIds ? { employeeId: { in: empIds } } : {});
+const idIn = (empIds?: string[] | null) => (empIds ? { id: { in: empIds } } : {});
+
 export class ClientDashboardService {
     constructor(private readonly db: PrismaClient) {}
 
-    async getTodayStats(orgId: string, teamId?: string, from?: Date, to?: Date) {
+    async getTodayStats(orgId: string, teamId?: string, from?: Date, to?: Date, empIds?: string[] | null) {
         const today = toDateOnly(new Date());
-        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}), ...idIn(empIds) };
 
         // Productivity metrics honor the selected date range; live counts always reflect "now".
         const rangeFilter = from && to
@@ -16,8 +24,8 @@ export class ClientDashboardService {
         const [totalEmployees, activeNow, summaries, todaySummaries] = await Promise.all([
             this.db.employee.count({ where: empWhere }),
             this.db.employee.count({ where: { ...empWhere, isCurrentlyWorking: true } }),
-            this.db.dailySummary.findMany({ where: { orgId, ...rangeFilter, ...(teamId ? { teamId } : {}) } }),
-            this.db.dailySummary.findMany({ where: { orgId, summaryDate: today, ...(teamId ? { teamId } : {}) } }),
+            this.db.dailySummary.findMany({ where: { orgId, ...rangeFilter, ...(teamId ? { teamId } : {}), ...empIn(empIds) } }),
+            this.db.dailySummary.findMany({ where: { orgId, summaryDate: today, ...(teamId ? { teamId } : {}), ...empIn(empIds) } }),
         ]);
 
         // "Checked in today" is a live figure — always today, regardless of the selected range
@@ -55,20 +63,20 @@ export class ClientDashboardService {
      * day (today), and Low engagement (persistent low productivity / high idle). Thresholds are
      * relative to each employee's expected work hours (fallback: org default, then 8h).
      */
-    async getWellbeingSignals(orgId: string, days = 7, teamId?: string, from?: Date, to?: Date) {
+    async getWellbeingSignals(orgId: string, days = 7, teamId?: string, from?: Date, to?: Date, empIds?: string[] | null) {
         // Window: explicit from/to when supplied (dashboard date picker), otherwise a
         // trailing `days` window ending today. The "acute long day" signal keys off the
         // LAST day of the window, which is today for the default range.
         const windowEnd = toDateOnly(to ?? new Date());
         const windowStart = from ? toDateOnly(from) : new Date(windowEnd.getTime() - (days - 1) * 86400000);
-        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}), ...idIn(empIds) };
 
         const [employees, orgDefault, expectedSettings, summaries] = await Promise.all([
             this.db.employee.findMany({ where: empWhere, select: { id: true, name: true } }),
             this.db.orgDefaultSetting.findFirst({ where: { orgId } }),
             this.db.expectedWorkHoursSetting.findMany({ where: { orgId } }),
             this.db.dailySummary.findMany({
-                where: { orgId, summaryDate: { gte: windowStart, lte: windowEnd }, ...(teamId ? { teamId } : {}) },
+                where: { orgId, summaryDate: { gte: windowStart, lte: windowEnd }, ...(teamId ? { teamId } : {}), ...empIn(empIds) },
             }),
         ]);
 
@@ -177,10 +185,10 @@ export class ClientDashboardService {
     // dashboard's date picker actually scopes the list.
     private async rankEmployeesByField(
         orgId: string, from: Date, to: Date, field: 'productiveSeconds' | 'unproductiveSeconds',
-        limit = 5, teamId?: string,
+        limit = 5, teamId?: string, empIds?: string[] | null,
     ) {
         const summaries = await this.db.dailySummary.findMany({
-            where: { orgId, summaryDate: { gte: toDateOnly(from), lte: toDateOnly(to) }, ...(teamId ? { teamId } : {}) },
+            where: { orgId, summaryDate: { gte: toDateOnly(from), lte: toDateOnly(to) }, ...(teamId ? { teamId } : {}), ...empIn(empIds) },
         });
 
         const byEmp = new Map<string, { seconds: number; scoreSum: number; scoreCount: number }>();
@@ -207,19 +215,21 @@ export class ClientDashboardService {
         }));
     }
 
-    async getTopProductive(orgId: string, from: Date, to: Date, limit = 5, teamId?: string) {
-        return this.rankEmployeesByField(orgId, from, to, 'productiveSeconds', limit, teamId);
+    async getTopProductive(orgId: string, from: Date, to: Date, limit = 5, teamId?: string, empIds?: string[] | null) {
+        return this.rankEmployeesByField(orgId, from, to, 'productiveSeconds', limit, teamId, empIds);
     }
 
-    async getTopUnproductive(orgId: string, from: Date, to: Date, limit = 5, teamId?: string) {
-        return this.rankEmployeesByField(orgId, from, to, 'unproductiveSeconds', limit, teamId);
+    async getTopUnproductive(orgId: string, from: Date, to: Date, limit = 5, teamId?: string, empIds?: string[] | null) {
+        return this.rankEmployeesByField(orgId, from, to, 'unproductiveSeconds', limit, teamId, empIds);
     }
 
-    async getTopApps(orgId: string, from: Date, to: Date, limit = 10, teamId?: string) {
-        const empIds = teamId
+    async getTopApps(orgId: string, from: Date, to: Date, limit = 10, teamId?: string, empIds?: string[] | null) {
+        // Scope restriction (empIds) wins; otherwise fall back to the admin's team-filter dropdown.
+        const teamEmpIds = (!empIds && teamId)
             ? await this.db.employee.findMany({ where: { orgId, teamId, deletedAt: null }, select: { id: true } })
                 .then(rows => rows.map(r => r.id))
             : undefined;
+        const finalEmpIds = empIds ?? teamEmpIds;
 
         const timeFilter = {
             OR: [
@@ -227,7 +237,7 @@ export class ClientDashboardService {
                 { startTime: null, receivedAt: { gte: from, lte: to } },
             ],
         };
-        const empFilter = empIds ? { employeeId: { in: empIds } } : {};
+        const empFilter = finalEmpIds ? { employeeId: { in: finalEmpIds } } : {};
 
         // System states that Trackpilots emits as app events — exclude from all app charts
 
@@ -292,9 +302,9 @@ export class ClientDashboardService {
         return [...appResults, ...webResults].sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds);
     }
 
-    async getTodayActivityTable(orgId: string, date: Date, teamId?: string) {
+    async getTodayActivityTable(orgId: string, date: Date, teamId?: string, empIds?: string[] | null) {
         const today = toDateOnly(date);
-        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+        const empWhere = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}), ...idIn(empIds) };
 
         const [employees, summaries] = await Promise.all([
             this.db.employee.findMany({
@@ -324,9 +334,9 @@ export class ClientDashboardService {
         });
     }
 
-    async getWorkHourChart(orgId: string, from: Date, to: Date, teamId?: string) {
+    async getWorkHourChart(orgId: string, from: Date, to: Date, teamId?: string, empIds?: string[] | null) {
         const summaries = await this.db.dailySummary.findMany({
-            where: { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}) },
+            where: { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}), ...empIn(empIds) },
             orderBy: { summaryDate: 'asc' },
         });
 
@@ -344,8 +354,8 @@ export class ClientDashboardService {
         return Array.from(byDate.entries()).map(([date, g]) => ({ date, ...g }));
     }
 
-    async getWorkModeSummary(orgId: string, teamId?: string) {
-        const where = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}) };
+    async getWorkModeSummary(orgId: string, teamId?: string, empIds?: string[] | null) {
+        const where = { orgId, deletedAt: null, status: 'active', ...(teamId ? { teamId } : {}), ...idIn(empIds) };
         const [total, activeNow] = await Promise.all([
             this.db.employee.count({ where }),
             this.db.employee.count({ where: { ...where, isCurrentlyWorking: true } }),
@@ -353,14 +363,15 @@ export class ClientDashboardService {
         return { total, activeNow, offline: total - activeNow };
     }
 
-    async getRecentScreenshots(orgId: string, limit = 20, teamId?: string) {
-        const empIds = teamId
+    async getRecentScreenshots(orgId: string, limit = 20, teamId?: string, empIds?: string[] | null) {
+        const teamEmpIds = (!empIds && teamId)
             ? await this.db.employee.findMany({ where: { orgId, teamId, deletedAt: null }, select: { id: true } })
                 .then(rows => rows.map(r => r.id))
             : undefined;
+        const finalEmpIds = empIds ?? teamEmpIds;
 
         const screenshots = await this.db.screenshot.findMany({
-            where: { orgId, ...(empIds ? { employeeId: { in: empIds } } : {}) },
+            where: { orgId, ...(finalEmpIds ? { employeeId: { in: finalEmpIds } } : {}) },
             orderBy: { capturedAt: 'desc' },
             take: limit,
             select: { id: true, employeeId: true, thumbnailUrl: true, appName: true, capturedAt: true, isBlurred: true, productivityStatus: true },
@@ -374,12 +385,15 @@ export class ClientDashboardService {
         return screenshots.map(s => ({ ...s, employeeName: empNames.get(s.employeeId) ?? 'Unknown' }));
     }
 
-    async getTeamComparison(orgId: string, date: Date) {
+    async getTeamComparison(orgId: string, date: Date, empIds?: string[] | null) {
         const today = toDateOnly(date);
         const teams = await this.db.team.findMany({ where: { orgId, deletedAt: null }, select: { id: true, name: true } });
-        const summaries = await this.db.dailySummary.findMany({ where: { orgId, summaryDate: today } });
+        const summaries = await this.db.dailySummary.findMany({ where: { orgId, summaryDate: today, ...empIn(empIds) } });
 
-        return teams.map(t => {
+        // Scoped callers (Manager/Employee) only see teams they have visibility into.
+        const visibleTeamIds = empIds ? new Set(summaries.map(s => s.teamId)) : null;
+
+        return teams.filter(t => !visibleTeamIds || visibleTeamIds.has(t.id)).map(t => {
             const teamSummaries = summaries.filter(s => s.teamId === t.id);
             const scored = teamSummaries.filter(s => s.productivityScore != null);
             const avgScore = scored.length > 0

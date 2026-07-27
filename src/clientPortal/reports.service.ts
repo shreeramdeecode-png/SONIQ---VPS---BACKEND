@@ -2,14 +2,31 @@ import type { PrismaClient } from '@prisma/client';
 import { toCsv } from '../utils/csvExport.js';
 import { excludeSystemAppsFilter } from '../utils/systemApps.js';
 
+// Data-scope filters (see clientDashboard.service.ts). empIds null = org scope
+// (Admin, no restriction); a list = Manager's team or the Employee alone.
+const empIn = (empIds?: string[] | null) => (empIds ? { employeeId: { in: empIds } } : {});
+const idIn = (empIds?: string[] | null) => (empIds ? { id: { in: empIds } } : {});
+// employeeId-column filter combining an optionally requested single id with the scope
+// set — a scoped caller can never widen past their visible set (intersection, not override).
+function mergeEmp(employeeId?: string, empIds?: string[] | null): Record<string, unknown> {
+    if (empIds) return { employeeId: { in: employeeId ? empIds.filter(x => x === employeeId) : empIds } };
+    return employeeId ? { employeeId } : {};
+}
+// id-column variant (Employee table).
+function mergeId(employeeId?: string, empIds?: string[] | null): Record<string, unknown> {
+    if (empIds) return { id: { in: employeeId ? empIds.filter(x => x === employeeId) : empIds } };
+    return employeeId ? { id: employeeId } : {};
+}
+
 export class ReportsService {
     constructor(private readonly db: PrismaClient) {}
 
-    async getProductivityTrend(orgId: string, from: Date, to: Date, teamId?: string) {
+    async getProductivityTrend(orgId: string, from: Date, to: Date, teamId?: string, empIds?: string[] | null) {
         const where = {
             orgId,
             summaryDate: { gte: from, lte: to },
             ...(teamId ? { teamId } : {}),
+            ...empIn(empIds),
         };
 
         const [summaries, employeeMap] = await Promise.all([
@@ -37,14 +54,14 @@ export class ReportsService {
         });
     }
 
-    async getAppUsage(orgId: string, from: Date, to: Date, employeeId?: string) {
+    async getAppUsage(orgId: string, from: Date, to: Date, employeeId?: string, empIds?: string[] | null) {
         const where = {
             orgId,
             eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
             ...excludeSystemAppsFilter,
-            ...(employeeId ? { employeeId } : {}),
+            ...mergeEmp(employeeId, empIds),
             OR: [
                 { startTime: { gte: from, lte: to } },
                 { startTime: null, receivedAt: { gte: from, lte: to } },
@@ -82,19 +99,24 @@ export class ReportsService {
     // (8AM–7PM) → { productive, total } seconds, keyed by 'YYYY-MM-DD'. The frontend
     // groups the dates into weeks (Mon–Fri, weekends skipped) and renders one grid per
     // week, so no two dates are ever merged into a single weekday row.
-    async getHourlyHeatmap(orgId: string, from: Date, to: Date, employeeId?: string, teamId?: string) {
-        // teamId scopes to that team's employees (used by the dashboard Peak Hours card)
-        const teamEmpIds = teamId
+    async getHourlyHeatmap(orgId: string, from: Date, to: Date, employeeId?: string, teamId?: string, empIds?: string[] | null) {
+        // teamId scopes to that team's employees (used by the dashboard Peak Hours card).
+        // Only honored for org scope; scoped roles are already limited by empIds.
+        const teamEmpIds = (!empIds && teamId)
             ? await this.db.employee.findMany({ where: { orgId, teamId, deletedAt: null }, select: { id: true } })
                 .then(rows => rows.map(r => r.id))
             : undefined;
+        // Precedence: explicit scope (empIds) / requested employeeId → admin's team filter.
+        const empClause = (empIds || employeeId)
+            ? mergeEmp(employeeId, empIds)
+            : teamEmpIds ? { employeeId: { in: teamEmpIds } } : {};
         const where = {
             orgId,
             eventType: 'App' as const,
             appName: { not: null },
             durationSeconds: { not: null },
             ...excludeSystemAppsFilter,
-            ...(employeeId ? { employeeId } : teamEmpIds ? { employeeId: { in: teamEmpIds } } : {}),
+            ...empClause,
             OR: [
                 { startTime: { gte: from, lte: to } },
                 { startTime: null, receivedAt: { gte: from, lte: to } },
@@ -134,11 +156,11 @@ export class ReportsService {
     //  - switchesPerHour: app/context switches per tracked hour
     // A productive "run" is consecutive productive events with <= 5 min gaps; any
     // non-productive event or a larger gap ends the run. System apps are excluded.
-    async getFocusMetrics(orgId: string, from: Date, to: Date, teamId?: string) {
-        const empWhere = { orgId, deletedAt: null, ...(teamId ? { teamId } : {}) };
+    async getFocusMetrics(orgId: string, from: Date, to: Date, teamId?: string, empIds?: string[] | null) {
+        const empWhere = { orgId, deletedAt: null, ...(teamId ? { teamId } : {}), ...idIn(empIds) };
         const employees = await this.db.employee.findMany({ where: empWhere, select: { id: true } });
-        const empIds = employees.map(e => e.id);
-        if (empIds.length === 0) return [];
+        const memberIds = employees.map(e => e.id);
+        if (memberIds.length === 0) return [];
 
         const events = await this.db.activityEvent.findMany({
             where: {
@@ -147,7 +169,7 @@ export class ReportsService {
                 appName: { not: null },
                 durationSeconds: { not: null },
                 ...excludeSystemAppsFilter,
-                employeeId: { in: empIds },
+                employeeId: { in: memberIds },
                 OR: [
                     { startTime: { gte: from, lte: to } },
                     { startTime: null, receivedAt: { gte: from, lte: to } },
@@ -225,8 +247,8 @@ export class ReportsService {
         return result;
     }
 
-    async getEffortUtilization(orgId: string, from: Date, to: Date, teamId?: string) {
-        const where = { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}) };
+    async getEffortUtilization(orgId: string, from: Date, to: Date, teamId?: string, empIds?: string[] | null) {
+        const where = { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}), ...empIn(empIds) };
 
         const [summaries, employees, workHourSettings, orgDefaults] = await Promise.all([
             this.db.dailySummary.findMany({ where, orderBy: [{ summaryDate: 'asc' }, { employeeId: 'asc' }] }),
@@ -264,8 +286,8 @@ export class ReportsService {
         });
     }
 
-    async getAttendanceReport(orgId: string, from: Date, to: Date, teamId?: string) {
-        const where = { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}) };
+    async getAttendanceReport(orgId: string, from: Date, to: Date, teamId?: string, empIds?: string[] | null) {
+        const where = { orgId, summaryDate: { gte: from, lte: to }, ...(teamId ? { teamId } : {}), ...empIn(empIds) };
 
         const [summaries, employees] = await Promise.all([
             this.db.dailySummary.findMany({ where, orderBy: [{ summaryDate: 'asc' }, { employeeId: 'asc' }] }),
@@ -352,15 +374,15 @@ export class ReportsService {
         );
     }
 
-    async getTimesheetReport(orgId: string, from: Date, to: Date, employeeId?: string) {
-        const empWhere = { orgId, deletedAt: null, status: 'active', ...(employeeId ? { id: employeeId } : {}) };
+    async getTimesheetReport(orgId: string, from: Date, to: Date, employeeId?: string, empIds?: string[] | null) {
+        const empWhere = { orgId, deletedAt: null, status: 'active', ...mergeId(employeeId, empIds) };
         const employees = await this.db.employee.findMany({
             where: empWhere,
             select: { id: true, name: true, designation: true, department: true, team: { select: { name: true } } },
         });
 
         const summaries = await this.db.dailySummary.findMany({
-            where: { orgId, summaryDate: { gte: from, lte: to }, ...(employeeId ? { employeeId } : {}) },
+            where: { orgId, summaryDate: { gte: from, lte: to }, ...mergeEmp(employeeId, empIds) },
             orderBy: [{ employeeId: 'asc' }, { summaryDate: 'asc' }],
         });
 
@@ -394,11 +416,11 @@ export class ReportsService {
         type: 'productivity' | 'app-usage' | 'effort' | 'attendance' | 'timesheet',
         from: Date,
         to: Date,
-        opts: { teamId?: string; employeeId?: string } = {},
+        opts: { teamId?: string; employeeId?: string; empIds?: string[] | null } = {},
     ): Promise<string> {
         switch (type) {
             case 'productivity': {
-                const rows = await this.getProductivityTrend(orgId, from, to, opts.teamId);
+                const rows = await this.getProductivityTrend(orgId, from, to, opts.teamId, opts.empIds);
                 return toCsv(rows.map(r => ({
                     Date: r.date, 'Employee ID': r.employeeId, Name: r.name,
                     Designation: r.designation ?? '', Team: r.team ?? '',
@@ -411,7 +433,7 @@ export class ReportsService {
                 })));
             }
             case 'app-usage': {
-                const rows = await this.getAppUsage(orgId, from, to, opts.employeeId);
+                const rows = await this.getAppUsage(orgId, from, to, opts.employeeId, opts.empIds);
                 return toCsv(rows.map(r => ({
                     App: r.appName ?? '', Domain: r.appDomain ?? '', Category: r.appCategory ?? '',
                     'Productivity Status': r.productivityStatus,
@@ -420,7 +442,7 @@ export class ReportsService {
                 })));
             }
             case 'effort': {
-                const rows = await this.getEffortUtilization(orgId, from, to, opts.teamId);
+                const rows = await this.getEffortUtilization(orgId, from, to, opts.teamId, opts.empIds);
                 return toCsv(rows.map(r => ({
                     Date: r.date, Name: r.name, Team: r.team ?? '',
                     'Target Work (hrs)': String(r.targetWorkHours),
@@ -432,7 +454,7 @@ export class ReportsService {
                 })));
             }
             case 'attendance': {
-                const rows = await this.getAttendanceReport(orgId, from, to, opts.teamId);
+                const rows = await this.getAttendanceReport(orgId, from, to, opts.teamId, opts.empIds);
                 return toCsv(rows.map(r => ({
                     Date: r.date, Name: r.name, Team: r.team ?? '',
                     Present: r.isPresent ? 'Yes' : 'No', Late: r.isLate ? 'Yes' : 'No',
@@ -443,7 +465,7 @@ export class ReportsService {
                 })));
             }
             case 'timesheet': {
-                const rows = await this.getTimesheetReport(orgId, from, to, opts.employeeId);
+                const rows = await this.getTimesheetReport(orgId, from, to, opts.employeeId, opts.empIds);
                 return toCsv(rows.map(r => ({
                     Date: r.date, Name: r.name, Team: r.team ?? '',
                     'Check-in': r.checkIn ?? '', 'Check-out': r.checkOut ?? '',

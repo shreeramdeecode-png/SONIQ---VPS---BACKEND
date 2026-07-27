@@ -10,14 +10,19 @@ function toIstDay(d: Date): Date {
     return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
 }
 
+// Data-scope filter for the Employee table (see clientDashboard.service.ts).
+// empIds null = org scope (Admin); a list = Manager's team or the Employee alone.
+const idIn = (empIds?: string[] | null) => (empIds ? { id: { in: empIds } } : {});
+
 export class AttendanceService {
     constructor(private readonly db: PrismaClient) {}
 
-    async getDailyAttendance(orgId: string, date: Date, teamId?: string) {
+    async getDailyAttendance(orgId: string, date: Date, teamId?: string, empIds?: string[] | null) {
         const summaryDate = toIstDay(date);
         const employeesWhere = {
             orgId, deletedAt: null, status: 'active',
             ...(teamId ? { teamId } : {}),
+            ...idIn(empIds),
         };
 
         const [employees, summaryMap] = await Promise.all([
@@ -73,7 +78,7 @@ export class AttendanceService {
         }));
     }
 
-    async getAttendanceTimeline(orgId: string, date: Date, teamId?: string, employeeId?: string) {
+    async getAttendanceTimeline(orgId: string, date: Date, teamId?: string, employeeId?: string, empIds?: string[] | null) {
         // IST-aligned day boundaries (UTC+5:30): events from IST midnight to IST midnight
         const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
         const istDate = new Date(date.getTime() + IST_OFFSET_MS);
@@ -82,10 +87,17 @@ export class AttendanceService {
         );
         const dayEnd = new Date(dayStart.getTime() + 86400000);
 
+        // Combine an optional requested employeeId with the scope restriction: a scoped
+        // caller can only ever see ids within their visible set (so `id: employeeId` is
+        // narrowed to the intersection, never overwritten).
+        let idFilter: Record<string, unknown> = {};
+        if (employeeId) idFilter = { id: employeeId };
+        if (empIds) idFilter = { id: { in: employeeId ? empIds.filter(x => x === employeeId) : empIds } };
+
         const empWhere = {
             orgId, deletedAt: null, status: 'active',
             ...(teamId ? { teamId } : {}),
-            ...(employeeId ? { id: employeeId } : {}),
+            ...idFilter,
         };
         const employees = await this.db.employee.findMany({
             where: empWhere,
@@ -138,8 +150,8 @@ export class AttendanceService {
         }));
     }
 
-    async exportAttendanceCsv(orgId: string, date: Date, teamId?: string): Promise<string> {
-        const rows = await this.getDailyAttendance(orgId, date, teamId);
+    async exportAttendanceCsv(orgId: string, date: Date, teamId?: string, empIds?: string[] | null): Promise<string> {
+        const rows = await this.getDailyAttendance(orgId, date, teamId, empIds);
         return toCsv(rows.map(r => ({
             'Employee ID': r.employeeId,
             'Name': r.name,

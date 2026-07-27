@@ -2,6 +2,7 @@ import NodeCache from 'node-cache';
 import type { PrismaClient } from '@prisma/client';
 import type { TokenService } from './token.service.js';
 import type { PasswordService } from './password.service.js';
+import { resolveScope, type Scope } from '../utils/roleScope.js';
 
 const OTP_TTL_SECONDS = 600;   // 10 min
 const RESET_TTL_SECONDS = 900; // 15 min
@@ -13,7 +14,7 @@ export interface ClientLoginResponse {
     refreshToken: string;
     expiresAt: Date;
     passwordSet: boolean;
-    profile: { employeeId: string; orgId: string; name: string; email: string; role: string };
+    profile: { employeeId: string; orgId: string; name: string; email: string; role: string; scope: Scope; teamId: string | null };
 }
 
 export interface ClientRefreshResponse {
@@ -55,6 +56,8 @@ export class ClientAuthService {
                 name: auth.employee.name,
                 email: auth.email,
                 role: auth.employee.role.name,
+                scope: resolveScope(auth.employee.role.name),
+                teamId: auth.employee.teamId ?? null,
             },
         };
     }
@@ -136,7 +139,7 @@ export class ClientAuthService {
         employeeId: string;
         orgId: string;
         email: string;
-        employee: { name: string; role: { name: string } };
+        employee: { name: string; teamId: string | null; role: { name: string } };
     }) {
         const accessToken = this.tokens.generateClientAccessToken({
             employeeId: auth.employeeId,
@@ -144,6 +147,8 @@ export class ClientAuthService {
             email: auth.email,
             name: auth.employee.name,
             roleName: auth.employee.role.name,
+            scope: resolveScope(auth.employee.role.name),
+            teamId: auth.employee.teamId ?? null,
         });
         const refreshToken = this.tokens.generateRefreshToken();
         const expiresAt = this.tokens.clientTokenExpiresAt();
