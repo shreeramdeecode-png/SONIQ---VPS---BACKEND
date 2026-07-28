@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { toCsv } from '../utils/csvExport.js';
 import { excludeSystemAppsFilter } from '../utils/systemApps.js';
+import { gapFilledByKey, type TimedSegment } from '../utils/activityTime.js';
 
 // Data-scope filters (see clientDashboard.service.ts). empIds null = org scope
 // (Admin, no restriction); a list = Manager's team or the Employee alone.
@@ -70,28 +71,41 @@ export class ReportsService {
 
         const events = await this.db.activityEvent.findMany({
             where,
-            select: { appName: true, appType: true, appDomain: true, appCategory: true, productivityStatus: true, durationSeconds: true },
+            select: { appName: true, appType: true, appDomain: true, appCategory: true, productivityStatus: true, durationSeconds: true, startTime: true, endTime: true, receivedAt: true },
         });
 
-        const groups = new Map<string, { totalDuration: number; count: number; meta: typeof events[0] }>();
+        // Per-app time is gap-filled (short pauses count as continuous use) to match
+        // Trackpilots. Gaps are attributed to whichever app was in the foreground before
+        // the pause, so switching between apps never double-counts.
+        const groupKey = (e: typeof events[0]) => `${e.appName}|${e.appDomain ?? ''}|${e.appCategory ?? ''}|${e.productivityStatus ?? 'Neutral'}`;
+        const segs: TimedSegment[] = events.map(e => {
+            const start = (e.startTime ?? e.receivedAt).getTime();
+            const end = e.endTime ? e.endTime.getTime() : start + (e.durationSeconds ?? 0) * 1000;
+            return { start, end, key: groupKey(e) };
+        });
+        const filled = gapFilledByKey(segs);
+
+        const meta = new Map<string, { e: typeof events[0]; count: number }>();
         for (const e of events) {
-            const key = `${e.appName}|${e.appDomain ?? ''}|${e.appCategory ?? ''}|${e.productivityStatus ?? 'Neutral'}`;
-            const g = groups.get(key) ?? { totalDuration: 0, count: 0, meta: e };
-            g.totalDuration += e.durationSeconds ?? 0;
-            g.count++;
-            groups.set(key, g);
+            const k = groupKey(e);
+            const m = meta.get(k) ?? { e, count: 0 };
+            m.count++;
+            meta.set(k, m);
         }
 
-        return Array.from(groups.values())
-            .map(({ totalDuration, count, meta }) => ({
-                appName: meta.appName,
-                appType: meta.appType, // 'Application' | 'Website' — lets the UI split apps vs sites correctly
-                appDomain: meta.appDomain,
-                appCategory: meta.appCategory,
-                productivityStatus: meta.productivityStatus ?? 'Neutral',
-                totalDurationSeconds: totalDuration,
-                eventCount: count,
-            }))
+        return Array.from(filled.entries())
+            .map(([key, totalDurationSeconds]) => {
+                const { e: m, count } = meta.get(key)!;
+                return {
+                    appName: m.appName,
+                    appType: m.appType, // 'Application' | 'Website' — lets the UI split apps vs sites correctly
+                    appDomain: m.appDomain,
+                    appCategory: m.appCategory,
+                    productivityStatus: m.productivityStatus ?? 'Neutral',
+                    totalDurationSeconds,
+                    eventCount: count,
+                };
+            })
             .sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds);
     }
 

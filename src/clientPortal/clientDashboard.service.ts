@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { excludeSystemAppsFilter } from '../utils/systemApps.js';
+import { gapFilledByKey, type TimedSegment } from '../utils/activityTime.js';
 
 // Data-scope filters. `empIds` is the set of employees the caller may see:
 //   null      → org scope (Admin), no restriction
@@ -239,67 +240,50 @@ export class ClientDashboardService {
         };
         const empFilter = finalEmpIds ? { employeeId: { in: finalEmpIds } } : {};
 
-        // System states that Trackpilots emits as app events — exclude from all app charts
+        // Fetch raw App events, then gap-fill each app's time (short pauses count as
+        // continuous use) to match Trackpilots — same helper as the daily-summary job.
+        const events = await this.db.activityEvent.findMany({
+            where: {
+                orgId, eventType: 'App' as const, appName: { not: null },
+                ...excludeSystemAppsFilter, ...empFilter, ...timeFilter,
+            },
+            select: {
+                appName: true, appType: true, appDomain: true, appCategory: true,
+                productivityStatus: true, durationSeconds: true, startTime: true, endTime: true, receivedAt: true,
+            },
+        });
 
-        // Native apps grouped by appName; websites grouped by domain for per-site breakdown
-        const [appGroups, webGroups] = await Promise.all([
-            this.db.activityEvent.groupBy({
-                by: ['appName'],
-                where: {
-                    orgId, eventType: 'App' as const, appType: 'Application',
-                    appName: { not: null },
-                    ...excludeSystemAppsFilter,
-                    ...empFilter, ...timeFilter,
-                },
-                _sum: { durationSeconds: true },
-                orderBy: { _sum: { durationSeconds: 'desc' } },
-                take: limit,
-            }),
-            this.db.activityEvent.groupBy({
-                by: ['appDomain'],
-                where: {
-                    orgId, eventType: 'App' as const, appType: 'Website',
-                    appDomain: { not: null },
-                    ...empFilter, ...timeFilter,
-                },
-                _sum: { durationSeconds: true },
-                orderBy: { _sum: { durationSeconds: 'desc' } },
-                take: limit,
-            }),
-        ]);
+        // Key native apps by appName, websites by domain (so each physical app/site is one row).
+        const keyOf = (e: typeof events[0]) => e.appType === 'Website'
+            ? `web|${e.appDomain ?? ''}`
+            : `app|${e.appName ?? ''}`;
+        const segs: TimedSegment[] = events
+            .filter(e => (e.appType === 'Website' ? e.appDomain : e.appName))
+            .map(e => {
+                const start = (e.startTime ?? e.receivedAt).getTime();
+                const end = e.endTime ? e.endTime.getTime() : start + (e.durationSeconds ?? 0) * 1000;
+                return { start, end, key: keyOf(e) };
+            });
+        const filled = gapFilledByKey(segs);
 
-        const [appResults, webResults] = await Promise.all([
-            Promise.all(appGroups.map(async g => {
-                const meta = await this.db.activityEvent.findFirst({
-                    where: { orgId, appName: g.appName, eventType: 'App', appType: 'Application', ...timeFilter },
-                    select: { appCategory: true, productivityStatus: true },
-                });
-                return {
-                    appName: g.appName,
-                    appDomain: null as string | null,
-                    appCategory: meta?.appCategory ?? null,
-                    productivityStatus: meta?.productivityStatus ?? 'Neutral',
-                    appType: 'Application',
-                    totalDurationSeconds: g._sum.durationSeconds ?? 0,
-                };
-            })),
-            Promise.all(webGroups.map(async g => {
-                const meta = await this.db.activityEvent.findFirst({
-                    where: { orgId, appDomain: g.appDomain, eventType: 'App', appType: 'Website', ...timeFilter },
-                    select: { appName: true, appCategory: true, productivityStatus: true },
-                });
-                return {
-                    appName: meta?.appName ?? g.appDomain,
-                    appDomain: g.appDomain,
-                    appCategory: meta?.appCategory ?? null,
-                    productivityStatus: meta?.productivityStatus ?? 'Neutral',
-                    appType: 'Website',
-                    totalDurationSeconds: g._sum.durationSeconds ?? 0,
-                };
-            })),
-        ]);
+        const meta = new Map<string, typeof events[0]>();
+        for (const e of events) { const k = keyOf(e); if (!meta.has(k)) meta.set(k, e); }
 
-        return [...appResults, ...webResults].sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds);
+        const results = [...filled.entries()].map(([key, totalDurationSeconds]) => {
+            const m = meta.get(key)!;
+            const isWeb = m.appType === 'Website';
+            return {
+                appName: isWeb ? (m.appName ?? m.appDomain) : m.appName,
+                appDomain: isWeb ? m.appDomain : (null as string | null),
+                appCategory: m.appCategory ?? null,
+                productivityStatus: m.productivityStatus ?? 'Neutral',
+                appType: isWeb ? 'Website' : 'Application',
+                totalDurationSeconds,
+            };
+        });
+
+        // Return a generous slice (apps + sites) — callers apply their own final limit.
+        return results.sort((a, b) => b.totalDurationSeconds - a.totalDurationSeconds).slice(0, limit * 2);
     }
 
     async getTodayActivityTable(orgId: string, date: Date, teamId?: string, empIds?: string[] | null) {
