@@ -75,8 +75,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     const app = Fastify({ logger: getLoggerOptions() });
 
     await app.register(cors, {
-       origin: ['https://soniq.deecodes.io'],
-    credentials: true,
+        origin: [
+            'https://app.teemly.co',       // Teemly frontend (current)
+            'https://soniq.deecodes.io',   // legacy domain (kept for safety)
+            'http://localhost:5173',       // local Vite dev
+            'http://localhost:3000',
+        ],
+        credentials: true,
     });
 
     // ── Raw body capture (required for webhook HMAC validation) ──────────────
