@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { ReportsService } from '../../clientPortal/reports.service.js';
 import { scopeForRequest } from '../../utils/roleScope.js';
+import { createModuleGuard } from '../../middleware/permissions.js';
+import { MODULE_INDEX, LEVEL } from '../../utils/modulePerms.js';
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 // Date-only strings (YYYY-MM-DD) from frontend IST browsers → align to IST day UTC boundaries
@@ -9,8 +11,12 @@ function istDayEnd(s: string): Date { return new Date(new Date(s).getTime() - IS
 
 export async function clientReportRoutes(app: FastifyInstance, svc: ReportsService) {
     const auth = app.authenticate('client');
+    const guard = createModuleGuard(app.prisma);
+    const view = guard(MODULE_INDEX.reports, LEVEL.VIEW);
+    // The hourly heatmap also powers the Dashboard's Peak Hours card.
+    const dashOrReports = guard([MODULE_INDEX.dashboard, MODULE_INDEX.reports], LEVEL.VIEW);
 
-    app.get('/api/client/reports/productivity-trend', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/productivity-trend', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
         const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
@@ -18,7 +24,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getProductivityTrend(req.orgId, from, to, teamId, empIds);
     });
 
-    app.get('/api/client/reports/app-usage', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/app-usage', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
         const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
@@ -28,7 +34,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getAppUsage(req.orgId, from, to, q['employeeId'], empIds);
     });
 
-    app.get('/api/client/reports/hourly-heatmap', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/hourly-heatmap', { preHandler: [auth, dashOrReports] }, async (req) => {
         const q = req.query as Record<string, string>;
         const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
         const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
@@ -36,7 +42,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getHourlyHeatmap(req.orgId, istDayStart(fromStr), istDayEnd(toStr), q['employeeId'], teamId, empIds);
     });
 
-    app.get('/api/client/reports/focus-sessions', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/focus-sessions', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
         const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
@@ -44,7 +50,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getFocusMetrics(req.orgId, istDayStart(fromStr), istDayEnd(toStr), teamId, empIds);
     });
 
-    app.get('/api/client/reports/effort', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/effort', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
         const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
@@ -52,7 +58,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getEffortUtilization(req.orgId, from, to, teamId, empIds);
     });
 
-    app.get('/api/client/reports/attendance', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/attendance', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
         const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
@@ -60,7 +66,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getAttendanceReport(req.orgId, from, to, teamId, empIds);
     });
 
-    app.get('/api/client/reports/timesheet', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/reports/timesheet', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));
         const to = new Date(q['to'] ?? new Date().toISOString().slice(0, 10));
@@ -68,7 +74,7 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getTimesheetReport(req.orgId, from, to, q['employeeId'], empIds);
     });
 
-    app.get('/api/client/reports/export', { preHandler: [auth] }, async (req, reply) => {
+    app.get('/api/client/reports/export', { preHandler: [auth, view] }, async (req, reply) => {
         const q = req.query as Record<string, string>;
         const type = (q['type'] ?? 'productivity') as 'productivity' | 'app-usage' | 'effort' | 'attendance' | 'timesheet';
         const from = new Date(q['from'] ?? new Date().toISOString().slice(0, 10));

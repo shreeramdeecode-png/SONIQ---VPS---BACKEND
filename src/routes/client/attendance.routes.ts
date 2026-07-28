@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { AttendanceService } from '../../clientPortal/attendance.service.js';
 import { scopeForRequest } from '../../utils/roleScope.js';
+import { createModuleGuard } from '../../middleware/permissions.js';
+import { MODULE_INDEX, LEVEL } from '../../utils/modulePerms.js';
 
 function parseDate(s: string | undefined): Date {
     if (!s) return new Date();
@@ -11,15 +13,16 @@ function parseDate(s: string | undefined): Date {
 
 export async function clientAttendanceRoutes(app: FastifyInstance, svc: AttendanceService) {
     const auth = app.authenticate('client');
+    const view = createModuleGuard(app.prisma)(MODULE_INDEX.attendance, LEVEL.VIEW);
 
-    app.get('/api/client/attendance/daily', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/attendance/daily', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const date = parseDate(q['date']);
         const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
         return svc.getDailyAttendance(req.orgId, date, teamId, empIds);
     });
 
-    app.get('/api/client/attendance/employees/:id', { preHandler: [auth] }, async (req, reply) => {
+    app.get('/api/client/attendance/employees/:id', { preHandler: [auth, view] }, async (req, reply) => {
         const { id } = req.params as { id: string };
         const q = req.query as Record<string, string>;
         const from = parseDate(q['from']);
@@ -31,14 +34,14 @@ export async function clientAttendanceRoutes(app: FastifyInstance, svc: Attendan
         return svc.getEmployeeAttendance(req.orgId, id, from, to);
     });
 
-    app.get('/api/client/attendance/timeline', { preHandler: [auth] }, async (req) => {
+    app.get('/api/client/attendance/timeline', { preHandler: [auth, view] }, async (req) => {
         const q = req.query as Record<string, string>;
         const date = parseDate(q['date']);
         const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
         return svc.getAttendanceTimeline(req.orgId, date, teamId, q['employeeId'], empIds);
     });
 
-    app.get('/api/client/attendance/export', { preHandler: [auth] }, async (req, reply) => {
+    app.get('/api/client/attendance/export', { preHandler: [auth, view] }, async (req, reply) => {
         const q = req.query as Record<string, string>;
         const date = parseDate(q['date']);
         const { empIds, teamId } = await scopeForRequest(app.prisma, req, q['teamId']);
