@@ -11,6 +11,7 @@ import pgbossPlugin from './plugins/pgboss.plugin.js';
 import { registerErrorHandler } from './middleware/errorHandler.js';
 import { registerTenantMiddleware } from './middleware/tenant.js';
 import { createPermissionGuard } from './middleware/permissions.js';
+import { resolveScope, type Scope } from './utils/roleScope.js';
 
 import { EncryptionService } from './infrastructure/encryption.service.js';
 import { AuditService } from './infrastructure/audit.service.js';
@@ -107,6 +108,11 @@ export async function buildApp(): Promise<FastifyInstance> {
                 if (decoded['org_id']) {
                     req.orgId = decoded['org_id'] as string;
                     req.actorId = (decoded['sub'] as string) ?? '';
+                    // Data scope for RBAC. Fresh tokens carry `scope`/`team_id`; older
+                    // tokens (issued before scoping) fall back to the role name so an
+                    // Admin still resolves to org and isn't wrongly restricted to self.
+                    req.scope = (decoded['scope'] as Scope) ?? resolveScope(decoded['role'] as string);
+                    req.teamId = (decoded['team_id'] as string | null) ?? null;
                 }
             } catch {
                 return reply.status(401).send({ error: 'Unauthorized' });
