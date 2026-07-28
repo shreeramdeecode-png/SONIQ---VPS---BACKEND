@@ -14,7 +14,7 @@ export interface ClientLoginResponse {
     refreshToken: string;
     expiresAt: Date;
     passwordSet: boolean;
-    profile: { employeeId: string; orgId: string; name: string; email: string; role: string; scope: Scope; teamId: string | null };
+    profile: { employeeId: string; orgId: string; name: string; email: string; role: string; scope: Scope; teamId: string | null; permissions: unknown; isAdmin: boolean };
 }
 
 export interface ClientRefreshResponse {
@@ -58,6 +58,8 @@ export class ClientAuthService {
                 role: auth.employee.role.name,
                 scope: resolveScope(auth.employee.role.name),
                 teamId: auth.employee.teamId ?? null,
+                permissions: auth.employee.role.permissions,
+                isAdmin: auth.employee.role.isSystemDefault,
             },
         };
     }
