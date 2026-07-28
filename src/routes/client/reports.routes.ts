@@ -24,7 +24,9 @@ export async function clientReportRoutes(app: FastifyInstance, svc: ReportsServi
         return svc.getProductivityTrend(req.orgId, from, to, teamId, empIds);
     });
 
-    app.get('/api/client/reports/app-usage', { preHandler: [auth, view] }, async (req) => {
+    // App usage also powers the employee's own Profile page (App Usage tab) — allow
+    // Dashboard access too; data is scope-filtered so a self user only sees their own.
+    app.get('/api/client/reports/app-usage', { preHandler: [auth, dashOrReports] }, async (req) => {
         const q = req.query as Record<string, string>;
         const fromStr = q['from'] ?? new Date().toISOString().slice(0, 10);
         const toStr = q['to'] ?? new Date().toISOString().slice(0, 10);
