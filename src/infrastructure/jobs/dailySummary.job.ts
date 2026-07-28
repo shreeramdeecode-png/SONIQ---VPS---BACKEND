@@ -1,6 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
 import { isSystemApp as isSystemAppName } from '../../utils/systemApps.js';
-import { gapFilledByKey, type TimedSegment } from '../../utils/activityTime.js';
 
 export class DailySummaryJob {
     constructor(private readonly db: PrismaClient) {}
@@ -63,19 +62,15 @@ export class DailySummaryJob {
         const isSystemApp = (e: { appName: string | null }) => isSystemAppName(e.appName);
 
         const appEvents = events.filter(e => e.eventType === 'App' && !isSystemApp(e));
-
-        // Productivity buckets — gap-filled so short (<60s) pauses between activity events
-        // count as continuous use, matching Trackpilots (see activityTime.ts). Each event
-        // is keyed by its productivity status; the helper bridges brief gaps.
-        const statusSegs: TimedSegment[] = appEvents.map(e => {
-            const start = (e.startTime ?? e.receivedAt).getTime();
-            const end = e.endTime ? e.endTime.getTime() : start + (e.durationSeconds ?? 0) * 1000;
-            return { start, end: Math.min(end, utcWindowEnd.getTime()), key: e.productivityStatus ?? 'Neutral' };
-        });
-        const byStatus = gapFilledByKey(statusSegs);
-        let productive = byStatus.get('Productive') ?? 0;
-        let unproductive = byStatus.get('Unproductive') ?? 0;
-        let neutral = byStatus.get('Neutral') ?? 0;
+        let productive = appEvents
+            .filter(e => e.productivityStatus === 'Productive')
+            .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
+        let unproductive = appEvents
+            .filter(e => e.productivityStatus === 'Unproductive')
+            .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
+        let neutral = appEvents
+            .filter(e => e.productivityStatus === 'Neutral')
+            .reduce((s, e) => s + (e.durationSeconds ?? 0), 0);
 
         // Idle time is carried by Trackpilots' "Idle" app events, which are excluded from
         // work above (blocklist). Their durations are per-event (verified, not cumulative),
@@ -121,9 +116,10 @@ export class DailySummaryJob {
             }
         }
 
-        // Total worked (Active) = Productive + Neutral + Unproductive, all gap-filled above.
-        // Matches Trackpilots' "Active Work Hours". (Idle is separate and not gap-filled.)
-        const totalWork = productive + neutral + unproductive;
+        // Total worked = sum of actual tracked event durations (matches Trackpilots' methodology),
+        // NOT the gap-merged span — gap-filling inflated the total vs Trackpilots.
+        // The merged segments above are still used for firstCheckin / lastCheckout below.
+        const totalWork = appEvents.reduce((sum, e) => sum + (e.durationSeconds ?? 0), 0);
 
         const clockInTimes = events
             .filter(e => {
