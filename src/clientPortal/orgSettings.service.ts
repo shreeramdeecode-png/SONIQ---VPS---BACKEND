@@ -70,7 +70,14 @@ export class OrgSettingsService {
 
     private async pushToTrackpilots(orgId: string, s: Record<string, unknown>): Promise<void> {
         const inTime = formatTimeField(s['defaultExpectedInTime']);
+        // Trackpilots REQUIRES workDaySettings on the default-setting endpoint — omitting it
+        // 400s the whole request (dropping every other field). Send the org's default work
+        // days, falling back to Mon–Fri if none are configured.
+        const workDays = (Array.isArray(s['defaultWorkDays']) && (s['defaultWorkDays'] as unknown[]).length > 0)
+            ? (s['defaultWorkDays'] as string[])
+            : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
         await this.trackpilots!.updateDefaultSettings(orgId, {
+            workDays,
             workHours: {
                 expectedWorkMinutesPerDay: Math.round(Number(s['defaultWorkHoursPerDay'] ?? 8) * 60),
                 expectedProductiveWorkMinutesPerDay: Math.round(Number(s['defaultProductiveHoursPerDay'] ?? 6) * 60),
