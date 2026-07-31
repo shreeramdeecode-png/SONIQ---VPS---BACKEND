@@ -215,9 +215,12 @@ export class TrackpilotsService {
         if (s.screenshot) body['screenshotSettings'] = s.screenshot;
         if (s.idleAlert) body['idleAlertSettings'] = s.idleAlert;
         if (s.stealth) body['stealthMonitoringSettings'] = s.stealth;
-        // NOTE: timezoneSettings intentionally NOT sent — Trackpilots' default-setting
-        // endpoint 500s when it's present (their per-employee endpoints never send it).
-        console.log('[TP-SYNC] default-setting PATCH body:', JSON.stringify(body)); // TEMP diag — remove after fix
+        // timezoneSettings is REQUIRED by this endpoint (400 without it). NOTE: as of
+        // 2026-08 Trackpilots' v1/settings/default-setting endpoint returns 500
+        // (UNKNOWN_SERVER_ERROR) for EVERY valid complete body — even with UTC — so org
+        // default sync is blocked on a Trackpilots-side bug. Our payload is correct and
+        // passes their validation; sync will start working once they fix the endpoint.
+        if (s.timezone) body['timezoneSettings'] = { timezone: s.timezone };
         const { status } = await this.http.patch('v1/settings/default-setting', body, { headers: this.auth(apiKey) });
         return status < 300;
     }
