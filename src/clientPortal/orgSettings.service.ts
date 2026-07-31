@@ -25,6 +25,26 @@ function parseTimeInput(val: unknown): Date | undefined {
     return new Date(Date.UTC(1970, 0, 1, Number(h) || 0, Number(m) || 0, 0));
 }
 
+// `defaultWorkDays` is stored as { mon:bool, tue:bool, … } (3-letter keys). Trackpilots
+// wants an array of ENABLED full lowercase day names. Tolerate an already-array value.
+// Falls back to Mon–Fri when none are enabled (Trackpilots rejects an empty work-day list).
+const DAY_KEY_TO_NAME: Record<string, string> = {
+    mon: 'monday', tue: 'tuesday', wed: 'wednesday', thu: 'thursday', fri: 'friday', sat: 'saturday', sun: 'sunday',
+    monday: 'monday', tuesday: 'tuesday', wednesday: 'wednesday', thursday: 'thursday', friday: 'friday', saturday: 'saturday', sunday: 'sunday',
+};
+function toWorkDayNames(raw: unknown): string[] {
+    let days: string[] = [];
+    if (Array.isArray(raw)) {
+        days = raw.map(d => DAY_KEY_TO_NAME[String(d).toLowerCase()]).filter(Boolean);
+    } else if (raw && typeof raw === 'object') {
+        days = Object.entries(raw as Record<string, unknown>)
+            .filter(([, v]) => v === true)
+            .map(([k]) => DAY_KEY_TO_NAME[k.toLowerCase()])
+            .filter(Boolean);
+    }
+    return days.length > 0 ? days : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+}
+
 export class OrgSettingsService {
     constructor(
         private readonly db: PrismaClient,
@@ -70,12 +90,10 @@ export class OrgSettingsService {
 
     private async pushToTrackpilots(orgId: string, s: Record<string, unknown>): Promise<void> {
         const inTime = formatTimeField(s['defaultExpectedInTime']);
-        // Trackpilots REQUIRES workDaySettings on the default-setting endpoint — omitting it
-        // 400s the whole request (dropping every other field). Send the org's default work
-        // days, falling back to Mon–Fri if none are configured.
-        const workDays = (Array.isArray(s['defaultWorkDays']) && (s['defaultWorkDays'] as unknown[]).length > 0)
-            ? (s['defaultWorkDays'] as string[])
-            : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+        // Trackpilots REQUIRES workDaySettings on the default-setting endpoint (omitting it
+        // 400s the whole request). `defaultWorkDays` is stored as { mon:bool, tue:bool, … };
+        // convert to the array of ENABLED full lowercase day names Trackpilots expects.
+        const workDays = toWorkDayNames(s['defaultWorkDays']);
         await this.trackpilots!.updateDefaultSettings(orgId, {
             workDays,
             workHours: {

@@ -216,6 +216,7 @@ export class TrackpilotsService {
         if (s.idleAlert) body['idleAlertSettings'] = s.idleAlert;
         if (s.stealth) body['stealthMonitoringSettings'] = s.stealth;
         if (s.timezone) body['timezoneSettings'] = { timezone: s.timezone };
+        console.log('[TP-SYNC] default-setting PATCH body:', JSON.stringify(body)); // TEMP diag — remove after fix
         const { status } = await this.http.patch('v1/settings/default-setting', body, { headers: this.auth(apiKey) });
         return status < 300;
     }
