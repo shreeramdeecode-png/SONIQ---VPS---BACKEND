@@ -215,7 +215,8 @@ export class TrackpilotsService {
         if (s.screenshot) body['screenshotSettings'] = s.screenshot;
         if (s.idleAlert) body['idleAlertSettings'] = s.idleAlert;
         if (s.stealth) body['stealthMonitoringSettings'] = s.stealth;
-        if (s.timezone) body['timezoneSettings'] = { timezone: s.timezone };
+        // NOTE: timezoneSettings intentionally NOT sent — Trackpilots' default-setting
+        // endpoint 500s when it's present (their per-employee endpoints never send it).
         console.log('[TP-SYNC] default-setting PATCH body:', JSON.stringify(body)); // TEMP diag — remove after fix
         const { status } = await this.http.patch('v1/settings/default-setting', body, { headers: this.auth(apiKey) });
         return status < 300;
